@@ -13,7 +13,7 @@ from .hotkey import DoubleTapDetector
 from .overlay import Overlay
 from .paste import paste
 from .replay import ReplayHotkey
-from .transcribe import transcribe, warmup
+from .transcribe import backend_name, transcribe, warmup
 
 
 def request_accessibility() -> bool:
@@ -45,10 +45,19 @@ class VlowApp(rumps.App):
         self._ready = False
 
         # Menubar fallbacks — reliable escape hatches if the hotkey misfires.
+        self._backend_item = rumps.MenuItem(f"Backend: {backend_name()}")
+        self._backend_item.set_callback(None)  # display-only
         self._stop_item = rumps.MenuItem("⏹ Stop & Transcribe", callback=self._menu_stop)
         self._discard_item = rumps.MenuItem("✕ Discard Recording", callback=self._menu_discard)
         self._replay_item = rumps.MenuItem("↻ Re-paste Last", callback=self._menu_replay)
-        self.menu = [self._stop_item, self._discard_item, self._replay_item, None]
+        self.menu = [
+            self._backend_item,
+            None,
+            self._stop_item,
+            self._discard_item,
+            self._replay_item,
+            None,
+        ]
 
         self._setup_timer = rumps.Timer(self._deferred_setup, 0.3)
         self._setup_timer.start()
@@ -88,12 +97,13 @@ class VlowApp(rumps.App):
             on_main_thread(lambda: self._set_title("🎙"))
             rumps.notification(
                 "vlow ready",
-                "",
+                f"backend: {backend_name()}",
                 "Double-tap Right Option to start dictation.",
             )
         except Exception as e:
-            print(f"warmup failed: {e}")
+            print(f"warmup failed: {e}", flush=True)
             on_main_thread(lambda: self._set_title("⚠️"))
+            rumps.notification("vlow warmup failed", backend_name(), str(e))
 
     def _set_title(self, t: str) -> None:
         self.title = t

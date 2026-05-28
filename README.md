@@ -23,6 +23,20 @@ rate-limited; if it's slow, generate a token at
 [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 and write it to `~/.cache/huggingface/token` (mode 600).
 
+## Transcription backends
+
+| Backend       | Env                    | Notes                                                     |
+|---------------|------------------------|-----------------------------------------------------------|
+| `mlx` (default) | `VLOW_BACKEND=mlx`     | Local, offline, free. Apple Silicon only. ~8–10× realtime. |
+| `assemblyai`  | `VLOW_BACKEND=assemblyai` | Cloud, paid, needs network. Per-call latency ~3–6s overhead from upload+queue. |
+
+For AssemblyAI, also set `ASSEMBLYAI_API_KEY=<key>`. Language defaults to
+auto-detect; force one with `VLOW_AAI_LANGUAGE=de` (any ISO 639-1 code).
+Speech models are `["universal-3-pro", "universal-2"]` in fallback order.
+
+The current backend appears in the menubar dropdown header. To switch,
+quit, change `VLOW_BACKEND`, and relaunch.
+
 ## First launch
 
 ```bash
@@ -115,12 +129,14 @@ Roughly 8–10× realtime on M-series for `large-v3`.
 
 ```
 src/vlow/
-├── __main__.py    CLI entry; `vlow` runs the app, `vlow test [secs]` one-shots
-├── app.py         rumps.App, state machine, menubar items, permission prompt
-├── audio.py       sounddevice InputStream → numpy float32 16 kHz mono
-├── transcribe.py  mlx-whisper wrapper, model warmup
-├── hotkey.py      Global + local NSEvent flagsChanged → double-tap detector
-├── overlay.py     Borderless non-activating NSPanel
-├── paste.py       pbcopy + synthesized Cmd+V via CGEvent
-└── replay.py      pynput global Ctrl+Cmd+V → re-paste last text
+├── __main__.py        CLI entry; `vlow` runs the app, `vlow test [secs]` one-shots
+├── app.py             rumps.App, state machine, menubar items, permission prompt
+├── audio.py           sounddevice InputStream → numpy float32 16 kHz mono
+├── transcribe.py      backend dispatcher (VLOW_BACKEND)
+├── transcribe_mlx.py  local large-v3 via mlx-whisper
+├── transcribe_aai.py  cloud universal-3-pro/2 via AssemblyAI SDK
+├── hotkey.py          global + local NSEvent flagsChanged → double-tap detector
+├── overlay.py         borderless non-activating NSPanel
+├── paste.py           pbcopy + synthesized Cmd+V via CGEvent
+└── replay.py          pynput global Ctrl+Cmd+V → re-paste last text
 ```

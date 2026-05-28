@@ -1,21 +1,30 @@
-import numpy as np
-import mlx_whisper
+import os
 
-MODEL = "mlx-community/whisper-large-v3-mlx"
-MIN_SAMPLES = 1600  # 0.1s at 16 kHz
+import numpy as np
+
+VALID_BACKENDS = ("mlx", "assemblyai")
+
+
+def backend_name() -> str:
+    name = (os.environ.get("VLOW_BACKEND") or "mlx").lower()
+    if name not in VALID_BACKENDS:
+        raise ValueError(
+            f"VLOW_BACKEND={name!r} not in {VALID_BACKENDS}"
+        )
+    return name
+
+
+def _backend():
+    if backend_name() == "assemblyai":
+        from . import transcribe_aai as m
+    else:
+        from . import transcribe_mlx as m
+    return m
 
 
 def warmup() -> None:
-    silence = np.zeros(16000, dtype=np.float32)
-    mlx_whisper.transcribe(silence, path_or_hf_repo=MODEL, verbose=False)
+    _backend().warmup()
 
 
 def transcribe(audio: np.ndarray) -> str:
-    if audio.size < MIN_SAMPLES:
-        return ""
-    result = mlx_whisper.transcribe(
-        audio,
-        path_or_hf_repo=MODEL,
-        verbose=False,
-    )
-    return result["text"].strip()
+    return _backend().transcribe(audio)

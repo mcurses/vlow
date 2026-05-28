@@ -12,6 +12,7 @@ dependencies = [
     "pyobjc-framework-Cocoa>=10.0",
     "pyobjc-framework-Quartz>=10.0",
     "rumps>=0.4.0",
+    "assemblyai>=0.30.0",
 ]
 
 [project.scripts]
