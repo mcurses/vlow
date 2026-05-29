@@ -10,6 +10,7 @@ HOTKEYS = {
     "fn":        (63, 1 << 23),  # NSEventModifierFlagFunction
     "right_cmd": (54, 1 << 20),  # NSEventModifierFlagCommand
     "right_opt": (61, 1 << 19),  # NSEventModifierFlagOption
+    "left_opt":  (58, 1 << 19),  # NSEventModifierFlagOption
 }
 DEFAULT_HOTKEY = "fn"
 
