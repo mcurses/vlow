@@ -8,3 +8,6 @@ build/
 .DS_Store
 .python-version
 .claude/
+.env
+.env.*
+!.env.example
