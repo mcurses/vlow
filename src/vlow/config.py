@@ -28,10 +28,22 @@ def load_dotenv() -> None:
         os.environ.setdefault(key, value)
 
 
+_TOML_TO_ENV = {
+    "backend": "VLOW_BACKEND",
+    "auto_threshold_sec": "VLOW_AUTO_THRESHOLD_SEC",
+    "aai_language": "VLOW_AAI_LANGUAGE",
+}
+
+
 def load() -> dict:
     load_dotenv()
     conf = dict(_DEFAULTS)
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "rb") as f:
             conf.update(tomllib.load(f))
+    # Mirror selected config.toml keys to env vars (other modules read
+    # os.environ). setdefault keeps shell env winning over .env / config.toml.
+    for toml_key, env_key in _TOML_TO_ENV.items():
+        if toml_key in conf:
+            os.environ.setdefault(env_key, str(conf[toml_key]))
     return conf

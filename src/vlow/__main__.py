@@ -1,6 +1,7 @@
 import sys
 
 from .app import VlowApp
+from .config import load as load_config
 
 
 def test_record(seconds: float = 4.0) -> None:
@@ -29,6 +30,7 @@ def test_record(seconds: float = 4.0) -> None:
 
 
 def main() -> None:
+    load_config()  # populate os.environ from .env + config.toml
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         secs = float(sys.argv[2]) if len(sys.argv) > 2 else 4.0
         test_record(secs)

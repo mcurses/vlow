@@ -25,17 +25,36 @@ and write it to `~/.cache/huggingface/token` (mode 600).
 
 ## Transcription backends
 
-| Backend       | Env                    | Notes                                                     |
-|---------------|------------------------|-----------------------------------------------------------|
-| `mlx` (default) | `VLOW_BACKEND=mlx`     | Local, offline, free. Apple Silicon only. ~8–10× realtime. |
-| `assemblyai`  | `VLOW_BACKEND=assemblyai` | Cloud, paid, needs network. Per-call latency ~3–6s overhead from upload+queue. |
+| Backend       | Env                       | Notes                                                              |
+|---------------|---------------------------|--------------------------------------------------------------------|
+| `mlx` (default) | `VLOW_BACKEND=mlx`        | Local, offline, free. Apple Silicon only. ~8–10× realtime.        |
+| `assemblyai`  | `VLOW_BACKEND=assemblyai` | Cloud, paid, needs network. ~3–6s upload/queue overhead per call. |
+| `auto`        | `VLOW_BACKEND=auto`       | Route by duration — short clips → `mlx`, long ones → `assemblyai`. |
 
-For AssemblyAI, also set `ASSEMBLYAI_API_KEY=<key>`. Language defaults to
-auto-detect; force one with `VLOW_AAI_LANGUAGE=de` (any ISO 639-1 code).
-Speech models are `["universal-3-pro", "universal-2"]` in fallback order.
+For AssemblyAI (or `auto`), also set `ASSEMBLYAI_API_KEY=<key>`.
+Language defaults to auto-detect; force one with `VLOW_AAI_LANGUAGE=de`
+(any ISO 639-1 code). Speech models are
+`["universal-3-pro", "universal-2"]` in fallback order.
+
+For `auto` mode, the duration threshold is 60s by default. Change it
+with `VLOW_AUTO_THRESHOLD_SEC=120` (env) or `auto_threshold_sec = 120`
+in `~/.config/vlow/config.toml`. The menubar header shows the active
+threshold while in auto mode.
 
 The current backend appears in the menubar dropdown header. To switch,
-quit, change `VLOW_BACKEND`, and relaunch.
+quit, change config, and relaunch.
+
+## User config
+
+Optional TOML file at `~/.config/vlow/config.toml`. All keys are
+optional; env vars (and `.env`) override TOML.
+
+```toml
+hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
+backend = "auto"            # mlx | assemblyai | auto
+auto_threshold_sec = 60     # used when backend = "auto"
+aai_language = "de"         # omit for AssemblyAI auto-detection
+```
 
 ## First launch
 

@@ -14,7 +14,14 @@ from .hotkey import DoubleTapDetector
 from .overlay import Overlay
 from .paste import paste
 from .replay import ReplayHotkey
-from .transcribe import backend_name, transcribe, warmup
+from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
+
+
+def _backend_label() -> str:
+    name = backend_name()
+    if name == "auto":
+        return f"Backend: auto (>{auto_threshold_sec():.0f}s → assemblyai)"
+    return f"Backend: {name}"
 
 
 def request_accessibility() -> bool:
@@ -47,7 +54,7 @@ class VlowApp(rumps.App):
         self._ready = False
 
         # Menubar fallbacks — reliable escape hatches if the hotkey misfires.
-        self._backend_item = rumps.MenuItem(f"Backend: {backend_name()}")
+        self._backend_item = rumps.MenuItem(_backend_label())
         self._backend_item.set_callback(None)  # display-only
         self._stop_item = rumps.MenuItem("⏹ Stop & Transcribe", callback=self._menu_stop)
         self._discard_item = rumps.MenuItem("✕ Discard Recording", callback=self._menu_discard)
