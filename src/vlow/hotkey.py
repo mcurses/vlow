@@ -5,14 +5,19 @@ from typing import Callable
 from Cocoa import NSEvent
 
 NSEventMaskFlagsChanged = 1 << 12
-RIGHT_OPTION_KEYCODE = 61
-NX_DEVICERALTKEYMASK = 0x40
+
+HOTKEYS = {
+    "fn":        (63, 1 << 23),  # NSEventModifierFlagFunction
+    "right_cmd": (54, 1 << 20),  # NSEventModifierFlagCommand
+    "right_opt": (61, 1 << 19),  # NSEventModifierFlagOption
+}
+DEFAULT_HOTKEY = "fn"
 
 DEBUG = bool(os.environ.get("VLOW_DEBUG"))
 
 
 class DoubleTapDetector:
-    """Detect a double-tap of the right Option key.
+    """Detect a double-tap of a modifier key (configurable).
 
     Uses BOTH a global and a local NSEvent monitor — the global one fires while
     other apps are active (the common case for a menubar app), the local one
@@ -22,7 +27,18 @@ class DoubleTapDetector:
     Requires Accessibility permission for the host process.
     """
 
-    def __init__(self, callback: Callable[[], None], threshold_sec: float = 0.35) -> None:
+    def __init__(
+        self,
+        callback: Callable[[], None],
+        hotkey: str = DEFAULT_HOTKEY,
+        threshold_sec: float = 0.35,
+    ) -> None:
+        if hotkey not in HOTKEYS:
+            raise ValueError(
+                f"Unknown hotkey {hotkey!r}. Choose from: {', '.join(HOTKEYS)}"
+            )
+        self._keycode, self._mask = HOTKEYS[hotkey]
+        self._hotkey_name = hotkey
         self._callback = callback
         self._threshold = threshold_sec
         self._last_press = 0.0
@@ -52,13 +68,13 @@ class DoubleTapDetector:
         return event
 
     def _handle(self, event) -> None:
-        if event.keyCode() != RIGHT_OPTION_KEYCODE:
+        if event.keyCode() != self._keycode:
             return
-        pressed = bool(event.modifierFlags() & NX_DEVICERALTKEYMASK)
+        pressed = bool(event.modifierFlags() & self._mask)
         if DEBUG:
             gap = time.monotonic() - self._last_press
             print(
-                f"[hotkey] rOpt {'down' if pressed else 'up'} "
+                f"[hotkey] {self._hotkey_name} {'down' if pressed else 'up'} "
                 f"was={self._was_pressed} gap={gap:.2f}s",
                 flush=True,
             )

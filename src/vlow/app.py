@@ -9,6 +9,7 @@ from ApplicationServices import (
 from Foundation import NSOperationQueue
 
 from .audio import Recorder
+from .config import load as load_config
 from .hotkey import DoubleTapDetector
 from .overlay import Overlay
 from .paste import paste
@@ -36,11 +37,12 @@ def on_main_thread(fn):
 class VlowApp(rumps.App):
     def __init__(self) -> None:
         super().__init__("vlow", title="🎙", quit_button="Quit")
+        self._config = load_config()
         self._state = State.IDLE
         self._recorder = Recorder()
         self._overlay: Overlay | None = None
         self._last_text = ""
-        self._hotkey = DoubleTapDetector(self._on_double_tap)
+        self._hotkey = DoubleTapDetector(self._on_double_tap, hotkey=self._config["hotkey"])
         self._replay = ReplayHotkey(lambda: self._last_text)
         self._ready = False
 
@@ -95,10 +97,11 @@ class VlowApp(rumps.App):
             warmup()
             self._ready = True
             on_main_thread(lambda: self._set_title("🎙"))
+            hotkey_label = self._config["hotkey"].replace("_", " ").title()
             rumps.notification(
                 "vlow ready",
                 f"backend: {backend_name()}",
-                "Double-tap Right Option to start dictation.",
+                f"Double-tap {hotkey_label} to start dictation.",
             )
         except Exception as e:
             print(f"warmup failed: {e}", flush=True)
