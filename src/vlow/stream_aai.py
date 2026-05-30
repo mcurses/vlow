@@ -28,6 +28,9 @@ class StreamingSession:
         self._on_final = on_final or (lambda _: None)
         self._queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
         self._final_parts: list[str] = []
+        self._last_partial: str = ""
+        # Serializes turn-state updates between the SDK's read thread and stop().
+        self._lock = threading.Lock()
         self._client = None
         self._stream: Optional[sd.InputStream] = None
         self._pump_thread: Optional[threading.Thread] = None
@@ -92,8 +95,15 @@ class StreamingSession:
         text = (event.transcript or "").strip()
         if not text:
             return
-        if getattr(event, "end_of_turn", False):
-            self._final_parts.append(text)
+        end_of_turn = bool(getattr(event, "end_of_turn", False))
+        with self._lock:
+            if end_of_turn:
+                self._final_parts.append(text)
+                self._last_partial = ""
+            else:
+                self._last_partial = text
+        # Fire callbacks outside the lock so a slow handler can't deadlock stop().
+        if end_of_turn:
             self._on_final(text)
         else:
             self._on_partial(text)
@@ -124,5 +134,21 @@ class StreamingSession:
         if self._pump_thread is not None:
             self._pump_thread.join(timeout=2.0)
             self._pump_thread = None
+
+        # If the user released mid-utterance, the server may have closed
+        # without finalizing the last partial — flush it as a final ourselves
+        # so nothing the user said is dropped. Lock to avoid racing a final
+        # event arriving from the SDK's read thread during disconnect.
+        with self._lock:
+            leftover = self._last_partial
+            self._last_partial = ""
+            if leftover:
+                self._final_parts.append(leftover)
+
+        if leftover:
+            try:
+                self._on_final(leftover)
+            except Exception as e:
+                print(f"[stream_aai] flush-final error: {e}", flush=True)
 
         return " ".join(self._final_parts).strip()
