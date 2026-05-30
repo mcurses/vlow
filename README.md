@@ -51,7 +51,7 @@ optional; env vars (and `.env`) override TOML.
 
 ```toml
 hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
-mode = "toggle"             # toggle (double-tap) or ptt (hold-to-talk streaming)
+mode = "toggle"             # toggle | live | ptt — see Usage
 backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
 auto_threshold_sec = 60     # used when backend = "auto"
 aai_language = "de"         # omit for AssemblyAI auto-detection
@@ -78,10 +78,11 @@ running vlow, not to your terminal:
 
 ## Usage
 
-Two interaction modes, picked in `config.toml` via `mode = "toggle"` (default)
-or `mode = "ptt"`.
+Three interaction modes, picked in `config.toml` via `mode = …`.
 
-**Toggle (double-tap)** — buffer, transcribe via configured backend, paste:
+**`toggle` (default)** — buffer the recording, transcribe via the
+configured backend (`mlx` / `assemblyai` / `auto`), paste once at the
+end. Best for offline / batch work.
 
 | Action                         | Hotkey                                       |
 |--------------------------------|----------------------------------------------|
@@ -89,20 +90,28 @@ or `mode = "ptt"`.
 | Stop and paste                 | Right Option × 2 again                       |
 | Re-paste last transcript       | Ctrl + Cmd + V                               |
 
-**PTT (push-to-talk)** — hold key, AssemblyAI streams live partials,
-release pastes the final transcript. Ignores `VLOW_BACKEND` (always
-AssemblyAI Universal Streaming `u3-rt-pro`). Requires
-`ASSEMBLYAI_API_KEY`.
+**`live`** — double-tap to start a live AssemblyAI streaming session.
+Each finalized turn pastes into the focused app as it arrives — text
+appears while you're still speaking. Double-tap again to stop. Ignores
+`VLOW_BACKEND` (always AssemblyAI Universal Streaming `u3-rt-pro`).
+Requires `ASSEMBLYAI_API_KEY`.
+
+| Action                         | Hotkey                                       |
+|--------------------------------|----------------------------------------------|
+| Start streaming                | Right Option × 2                             |
+| Stop streaming                 | Right Option × 2 again                       |
+| Re-paste last transcript       | Ctrl + Cmd + V                               |
+
+**`ptt`** — hold-to-talk variant of `live`. Hold the hotkey while you
+speak, release to stop. Same streaming + progressive paste. In PTT mode
+the chosen modifier is hijacked while vlow runs — you can't use Right
+Option for its normal purpose (umlauts etc).
 
 | Action                         | Hotkey                                       |
 |--------------------------------|----------------------------------------------|
 | Talk                           | Hold Right Option                            |
-| Stop and paste                 | Release                                      |
+| Stop                           | Release                                      |
 | Re-paste last transcript       | Ctrl + Cmd + V                               |
-
-Note: in PTT mode the chosen modifier (e.g. Right Option) is hijacked —
-you can't use it for its normal purpose (typing umlauts etc.) while
-vlow is running.
 
 The menubar icon reflects state: `🎙` idle, `🔴` recording,
 `⏳` transcribing, `⚠️` error. A small floating overlay also shows the

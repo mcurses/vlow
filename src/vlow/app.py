@@ -42,16 +42,21 @@ def on_main_thread(fn):
     NSOperationQueue.mainQueue().addOperationWithBlock_(fn)
 
 
+VALID_MODES = ("toggle", "live", "ptt")
+
+
 class VlowApp(rumps.App):
     def __init__(self) -> None:
         super().__init__("vlow", title="🎙", quit_button="Quit")
         self._config = load_config()
         self._mode = self._config.get("mode", "toggle")
-        if self._mode not in ("toggle", "ptt"):
-            raise ValueError(f"config.mode must be 'toggle' or 'ptt', got {self._mode!r}")
+        if self._mode not in VALID_MODES:
+            raise ValueError(f"config.mode must be one of {VALID_MODES}, got {self._mode!r}")
+        self._streaming_mode = self._mode in ("ptt", "live")
         self._state = State.IDLE
-        self._recorder = Recorder()  # used in toggle mode
-        self._stream: StreamingSession | None = None  # used in ptt mode
+        self._recorder = Recorder()  # toggle mode (buffer + batch)
+        self._stream: StreamingSession | None = None  # live/ptt modes
+        self._pasted_in_session = False
         self._overlay: Overlay | None = None
         self._last_text = ""
         self._replay = ReplayHotkey(lambda: self._last_text)
@@ -59,11 +64,16 @@ class VlowApp(rumps.App):
 
         if self._mode == "ptt":
             self._hotkey = HoldDetector(
-                self._on_ptt_press,
-                self._on_ptt_release,
+                self._start_stream,
+                self._stop_stream,
                 hotkey=self._config["hotkey"],
             )
-        else:
+        elif self._mode == "live":
+            self._hotkey = DoubleTapDetector(
+                self._toggle_stream,
+                hotkey=self._config["hotkey"],
+            )
+        else:  # toggle
             self._hotkey = DoubleTapDetector(
                 self._on_double_tap,
                 hotkey=self._config["hotkey"],
@@ -93,19 +103,19 @@ class VlowApp(rumps.App):
     def _menu_stop(self, _) -> None:
         if self._state != State.RECORDING:
             return
-        if self._mode == "ptt":
-            self._on_ptt_release()
+        if self._streaming_mode:
+            self._stop_stream()
         else:
             self._stop_and_transcribe()
 
     def _menu_discard(self, _) -> None:
         if self._state != State.RECORDING:
             return
-        if self._mode == "ptt" and self._stream is not None:
+        if self._streaming_mode and self._stream is not None:
             try:
                 self._stream.stop()
             except Exception as e:
-                print(f"discard ptt error: {e}", flush=True)
+                print(f"discard stream error: {e}", flush=True)
             self._stream = None
         else:
             self._recorder.stop()
@@ -132,10 +142,12 @@ class VlowApp(rumps.App):
 
     def _warmup(self) -> None:
         try:
-            if self._mode == "ptt":
+            if self._streaming_mode:
                 import os as _os
                 if not _os.environ.get("ASSEMBLYAI_API_KEY"):
-                    raise RuntimeError("ASSEMBLYAI_API_KEY required for ptt mode.")
+                    raise RuntimeError(
+                        f"ASSEMBLYAI_API_KEY required for {self._mode} mode."
+                    )
             else:
                 warmup()
             self._ready = True
@@ -144,8 +156,14 @@ class VlowApp(rumps.App):
             if self._mode == "ptt":
                 rumps.notification(
                     "vlow ready",
-                    "mode: ptt — streaming via AssemblyAI",
+                    "mode: ptt — live streaming",
                     f"Hold {hotkey_label} to talk.",
+                )
+            elif self._mode == "live":
+                rumps.notification(
+                    "vlow ready",
+                    "mode: live — streaming, paste-as-you-talk",
+                    f"Double-tap {hotkey_label} to start.",
                 )
             else:
                 rumps.notification(
@@ -171,48 +189,81 @@ class VlowApp(rumps.App):
             self._stop_and_transcribe()
         # ignore taps while transcribing
 
-    def _on_ptt_press(self) -> None:
+    def _toggle_stream(self) -> None:
+        if not self._ready:
+            rumps.notification("vlow", "", "Loading…")
+            return
+        if self._state == State.IDLE:
+            self._start_stream()
+        elif self._state == State.RECORDING:
+            self._stop_stream()
+
+    def _start_stream(self) -> None:
         if not self._ready or self._state != State.IDLE:
             return
         self._state = State.RECORDING
+        self._pasted_in_session = False
+        self._last_text = ""
         self.title = "🔴"
         if self._overlay is not None:
             self._overlay.show("● Listening…")
-        self._stream = StreamingSession(on_partial=self._on_partial)
+        self._stream = StreamingSession(
+            on_partial=self._on_stream_partial,
+            on_final=self._on_stream_final,
+        )
         try:
             self._stream.start()
         except Exception as e:
-            print(f"ptt start error: {e}", flush=True)
-            rumps.notification("vlow ptt error", "", str(e))
+            print(f"stream start error: {e}", flush=True)
+            rumps.notification("vlow stream error", "", str(e))
             self._stream = None
             self._reset()
 
-    def _on_ptt_release(self) -> None:
+    def _stop_stream(self) -> None:
         if self._state != State.RECORDING or self._stream is None:
             return
         self._state = State.TRANSCRIBING
         self.title = "⏳"
         if self._overlay is not None:
             self._overlay.update("⏳ Finalizing…")
-        threading.Thread(target=self._finish_ptt, daemon=True).start()
+        threading.Thread(target=self._finish_stream, daemon=True).start()
 
-    def _finish_ptt(self) -> None:
-        text = ""
+    def _finish_stream(self) -> None:
         session = self._stream
         try:
             if session is not None:
-                text = session.stop()
+                session.stop()  # late finals fire via on_final during this
         except Exception as e:
-            print(f"ptt stop error: {e}", flush=True)
+            print(f"stream stop error: {e}", flush=True)
         finally:
             self._stream = None
-        on_main_thread(lambda: self._finish(text))
+        on_main_thread(self._after_stream)
 
-    def _on_partial(self, text: str) -> None:
+    def _after_stream(self) -> None:
+        if self._overlay is not None:
+            self._overlay.hide()
+        self.title = "🎙"
+        self._state = State.IDLE
+
+    def _on_stream_partial(self, text: str) -> None:
         if self._overlay is None:
             return
         display = text if len(text) <= 60 else "…" + text[-60:]
         on_main_thread(lambda: self._overlay.update(f"● {display}"))
+
+    def _on_stream_final(self, text: str) -> None:
+        # Paste each final turn progressively so dictation appears live in the
+        # focused app. Add a leading space between turns of the same session.
+        if self._pasted_in_session:
+            chunk = " " + text
+        else:
+            chunk = text
+            self._pasted_in_session = True
+        try:
+            paste(chunk)
+        except Exception as e:
+            print(f"live paste error: {e}", flush=True)
+        self._last_text = (self._last_text + " " + text).strip() if self._last_text else text
 
     def _start_recording(self) -> None:
         self._state = State.RECORDING
