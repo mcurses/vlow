@@ -51,7 +51,7 @@ optional; env vars (and `.env`) override TOML.
 
 ```toml
 hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
-mode = "toggle"             # toggle | live | ptt — see Usage
+mode = "toggle"             # toggle (default; double-tap + hold) or ptt (hold-only)
 backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
 auto_threshold_sec = 60     # used when backend = "auto"
 aai_language = "de"         # omit for AssemblyAI auto-detection
@@ -78,40 +78,27 @@ running vlow, not to your terminal:
 
 ## Usage
 
-Three interaction modes, picked in `config.toml` via `mode = …`.
+Two interaction modes, picked in `config.toml` via `mode = …`.
 
-**`toggle` (default)** — buffer the recording, transcribe via the
-configured backend (`mlx` / `assemblyai` / `auto`), paste once at the
-end. Best for offline / batch work.
+**`toggle` (default)** — one hotkey, two gestures:
 
-| Action                         | Hotkey                                       |
+| Gesture                        | Action                                       |
 |--------------------------------|----------------------------------------------|
-| Start recording                | Right Option × 2 (within 350 ms)             |
-| Stop and paste                 | Right Option × 2 again                       |
-| Re-paste last transcript       | Ctrl + Cmd + V                               |
+| Right Option × 2 (within 350 ms) | Start batch recording (mlx / assemblyai / auto). Double-tap again to stop and paste once. |
+| Hold Right Option              | Live AssemblyAI streaming. Finalized turns paste into the focused app as they arrive. Release to stop. |
+| Ctrl + Cmd + V                 | Re-paste last transcript.                    |
 
-**`live`** — double-tap to start a live AssemblyAI streaming session.
-Each finalized turn pastes into the focused app as it arrives — text
-appears while you're still speaking. Double-tap again to stop. Ignores
-`VLOW_BACKEND` (always AssemblyAI Universal Streaming `u3-rt-pro`).
-Requires `ASSEMBLYAI_API_KEY`.
+The hold gesture needs `ASSEMBLYAI_API_KEY`; without it, only double-tap
+batch recording works (the startup notification will tell you).
 
-| Action                         | Hotkey                                       |
+**`ptt`** — hold-only streaming variant. No double-tap behavior; the
+chosen modifier is dedicated to push-to-talk while vlow runs. Useful if
+you don't want any double-tap dictation at all.
+
+| Gesture                        | Action                                       |
 |--------------------------------|----------------------------------------------|
-| Start streaming                | Right Option × 2                             |
-| Stop streaming                 | Right Option × 2 again                       |
-| Re-paste last transcript       | Ctrl + Cmd + V                               |
-
-**`ptt`** — hold-to-talk variant of `live`. Hold the hotkey while you
-speak, release to stop. Same streaming + progressive paste. In PTT mode
-the chosen modifier is hijacked while vlow runs — you can't use Right
-Option for its normal purpose (umlauts etc).
-
-| Action                         | Hotkey                                       |
-|--------------------------------|----------------------------------------------|
-| Talk                           | Hold Right Option                            |
-| Stop                           | Release                                      |
-| Re-paste last transcript       | Ctrl + Cmd + V                               |
+| Hold Right Option              | Live AssemblyAI streaming with progressive paste. Release to stop. |
+| Ctrl + Cmd + V                 | Re-paste last transcript.                    |
 
 The menubar icon reflects state: `🎙` idle, `🔴` recording,
 `⏳` transcribing, `⚠️` error. A small floating overlay also shows the

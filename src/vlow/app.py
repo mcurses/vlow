@@ -10,7 +10,7 @@ from Foundation import NSOperationQueue
 
 from .audio import Recorder
 from .config import load as load_config
-from .hotkey import DoubleTapDetector, HoldDetector
+from .hotkey import DoubleTapDetector, HoldDetector, TapHoldDetector
 from .overlay import Overlay
 from .paste import paste
 from .replay import ReplayHotkey
@@ -34,15 +34,17 @@ def request_accessibility() -> bool:
 
 class State(Enum):
     IDLE = "idle"
-    RECORDING = "recording"
-    TRANSCRIBING = "transcribing"
+    RECORDING = "recording"      # batch mic capture (toggle gesture)
+    STREAMING = "streaming"      # live AAI stream (hold gesture)
+    TRANSCRIBING = "transcribing"  # batch finished, awaiting result
+    FINALIZING = "finalizing"    # stream stopped, awaiting last finals
 
 
 def on_main_thread(fn):
     NSOperationQueue.mainQueue().addOperationWithBlock_(fn)
 
 
-VALID_MODES = ("toggle", "live", "ptt")
+VALID_MODES = ("toggle", "ptt")
 
 
 class VlowApp(rumps.App):
@@ -52,10 +54,9 @@ class VlowApp(rumps.App):
         self._mode = self._config.get("mode", "toggle")
         if self._mode not in VALID_MODES:
             raise ValueError(f"config.mode must be one of {VALID_MODES}, got {self._mode!r}")
-        self._streaming_mode = self._mode in ("ptt", "live")
         self._state = State.IDLE
-        self._recorder = Recorder()  # toggle mode (buffer + batch)
-        self._stream: StreamingSession | None = None  # live/ptt modes
+        self._recorder = Recorder()
+        self._stream: StreamingSession | None = None
         self._pasted_in_session = False
         self._overlay: Overlay | None = None
         self._last_text = ""
@@ -68,14 +69,11 @@ class VlowApp(rumps.App):
                 self._stop_stream,
                 hotkey=self._config["hotkey"],
             )
-        elif self._mode == "live":
-            self._hotkey = DoubleTapDetector(
-                self._toggle_stream,
-                hotkey=self._config["hotkey"],
-            )
-        else:  # toggle
-            self._hotkey = DoubleTapDetector(
-                self._on_double_tap,
+        else:  # toggle — double-tap = batch, hold = streaming
+            self._hotkey = TapHoldDetector(
+                on_double_tap=self._on_double_tap,
+                on_hold_start=self._start_stream,
+                on_hold_end=self._stop_stream,
                 hotkey=self._config["hotkey"],
             )
 
@@ -101,25 +99,22 @@ class VlowApp(rumps.App):
         self._setup_timer.start()
 
     def _menu_stop(self, _) -> None:
-        if self._state != State.RECORDING:
-            return
-        if self._streaming_mode:
-            self._stop_stream()
-        else:
+        if self._state == State.RECORDING:
             self._stop_and_transcribe()
+        elif self._state == State.STREAMING:
+            self._stop_stream()
 
     def _menu_discard(self, _) -> None:
-        if self._state != State.RECORDING:
-            return
-        if self._streaming_mode and self._stream is not None:
+        if self._state == State.RECORDING:
+            self._recorder.stop()
+            self._reset()
+        elif self._state == State.STREAMING and self._stream is not None:
             try:
                 self._stream.stop()
             except Exception as e:
                 print(f"discard stream error: {e}", flush=True)
             self._stream = None
-        else:
-            self._recorder.stop()
-        self._reset()
+            self._reset()
 
     def _menu_replay(self, _) -> None:
         if self._last_text:
@@ -141,14 +136,13 @@ class VlowApp(rumps.App):
         threading.Thread(target=self._warmup, daemon=True).start()
 
     def _warmup(self) -> None:
+        import os as _os
         try:
-            if self._streaming_mode:
-                import os as _os
+            if self._mode == "ptt":
                 if not _os.environ.get("ASSEMBLYAI_API_KEY"):
-                    raise RuntimeError(
-                        f"ASSEMBLYAI_API_KEY required for {self._mode} mode."
-                    )
+                    raise RuntimeError("ASSEMBLYAI_API_KEY required for ptt mode.")
             else:
+                # toggle mode: mlx for batch; aai key needed for the hold gesture.
                 warmup()
             self._ready = True
             on_main_thread(lambda: self._set_title("🎙"))
@@ -159,17 +153,17 @@ class VlowApp(rumps.App):
                     "mode: ptt — live streaming",
                     f"Hold {hotkey_label} to talk.",
                 )
-            elif self._mode == "live":
-                rumps.notification(
-                    "vlow ready",
-                    "mode: live — streaming, paste-as-you-talk",
-                    f"Double-tap {hotkey_label} to start.",
-                )
             else:
+                aai_ok = bool(_os.environ.get("ASSEMBLYAI_API_KEY"))
+                hold_hint = (
+                    "hold for live streaming"
+                    if aai_ok
+                    else "hold disabled — ASSEMBLYAI_API_KEY missing"
+                )
                 rumps.notification(
                     "vlow ready",
-                    f"backend: {backend_name()}",
-                    f"Double-tap {hotkey_label} to start dictation.",
+                    f"backend: {backend_name()} · {hold_hint}",
+                    f"Double-tap {hotkey_label} to record, hold to stream.",
                 )
         except Exception as e:
             print(f"warmup failed: {e}", flush=True)
@@ -187,26 +181,19 @@ class VlowApp(rumps.App):
             self._start_recording()
         elif self._state == State.RECORDING:
             self._stop_and_transcribe()
-        # ignore taps while transcribing
-
-    def _toggle_stream(self) -> None:
-        if not self._ready:
-            rumps.notification("vlow", "", "Loading…")
-            return
-        if self._state == State.IDLE:
-            self._start_stream()
-        elif self._state == State.RECORDING:
-            self._stop_stream()
+        # ignore taps while transcribing or streaming
 
     def _start_stream(self) -> None:
+        # Hold gesture can fire while the user is also in a batch session —
+        # ignore unless we're idle.
         if not self._ready or self._state != State.IDLE:
             return
-        self._state = State.RECORDING
+        self._state = State.STREAMING
         self._pasted_in_session = False
         self._last_text = ""
         self.title = "🔴"
         if self._overlay is not None:
-            self._overlay.show("● Listening…")
+            self._overlay.show("● Streaming…")
         self._stream = StreamingSession(
             on_partial=self._on_stream_partial,
             on_final=self._on_stream_final,
@@ -220,9 +207,9 @@ class VlowApp(rumps.App):
             self._reset()
 
     def _stop_stream(self) -> None:
-        if self._state != State.RECORDING or self._stream is None:
+        if self._state != State.STREAMING or self._stream is None:
             return
-        self._state = State.TRANSCRIBING
+        self._state = State.FINALIZING
         self.title = "⏳"
         if self._overlay is not None:
             self._overlay.update("⏳ Finalizing…")
