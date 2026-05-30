@@ -4,6 +4,13 @@ import time
 from typing import Callable, Optional
 
 from Cocoa import NSEvent
+from Foundation import NSOperationQueue
+
+
+def _on_main_thread(fn: Callable[[], None]) -> None:
+    """Dispatch a no-arg callable onto the main NSOperationQueue. Safe from
+    any thread; AppKit objects must only be touched from the main thread."""
+    NSOperationQueue.mainQueue().addOperationWithBlock_(fn)
 
 NSEventMaskFlagsChanged = 1 << 12
 
@@ -208,13 +215,15 @@ class TapHoldDetector:
             self._fire(self._on_hold_end)
 
     def _hold_timeout(self) -> None:
+        # Timer fires on a Python thread — bounce the callback onto the main
+        # runloop because consumers will likely touch AppKit (overlay, menubar).
         fire = False
         with self._lock:
             if self._state == "pressed":
                 self._state = "held"
                 fire = True
         if fire:
-            self._fire(self._on_hold_start)
+            _on_main_thread(lambda: self._fire(self._on_hold_start))
 
     def _dt_timeout(self) -> None:
         with self._lock:
