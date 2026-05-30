@@ -9,6 +9,7 @@ ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 _DEFAULTS = {
     "hotkey": "fn",
+    "mode": "toggle",  # "toggle" (double-tap) or "ptt" (hold-to-talk)
 }
 
 

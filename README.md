@@ -51,7 +51,8 @@ optional; env vars (and `.env`) override TOML.
 
 ```toml
 hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
-backend = "auto"            # mlx | assemblyai | auto
+mode = "toggle"             # toggle (double-tap) or ptt (hold-to-talk streaming)
+backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
 auto_threshold_sec = 60     # used when backend = "auto"
 aai_language = "de"         # omit for AssemblyAI auto-detection
 ```
@@ -77,11 +78,31 @@ running vlow, not to your terminal:
 
 ## Usage
 
+Two interaction modes, picked in `config.toml` via `mode = "toggle"` (default)
+or `mode = "ptt"`.
+
+**Toggle (double-tap)** — buffer, transcribe via configured backend, paste:
+
 | Action                         | Hotkey                                       |
 |--------------------------------|----------------------------------------------|
 | Start recording                | Right Option × 2 (within 350 ms)             |
 | Stop and paste                 | Right Option × 2 again                       |
 | Re-paste last transcript       | Ctrl + Cmd + V                               |
+
+**PTT (push-to-talk)** — hold key, AssemblyAI streams live partials,
+release pastes the final transcript. Ignores `VLOW_BACKEND` (always
+AssemblyAI Universal Streaming `u3-rt-pro`). Requires
+`ASSEMBLYAI_API_KEY`.
+
+| Action                         | Hotkey                                       |
+|--------------------------------|----------------------------------------------|
+| Talk                           | Hold Right Option                            |
+| Stop and paste                 | Release                                      |
+| Re-paste last transcript       | Ctrl + Cmd + V                               |
+
+Note: in PTT mode the chosen modifier (e.g. Right Option) is hijacked —
+you can't use it for its normal purpose (typing umlauts etc.) while
+vlow is running.
 
 The menubar icon reflects state: `🎙` idle, `🔴` recording,
 `⏳` transcribing, `⚠️` error. A small floating overlay also shows the
@@ -150,11 +171,12 @@ Roughly 8–10× realtime on M-series for `large-v3`.
 src/vlow/
 ├── __main__.py        CLI entry; `vlow` runs the app, `vlow test [secs]` one-shots
 ├── app.py             rumps.App, state machine, menubar items, permission prompt
-├── audio.py           sounddevice InputStream → numpy float32 16 kHz mono
+├── audio.py           sounddevice InputStream → numpy float32 16 kHz mono (toggle mode)
 ├── transcribe.py      backend dispatcher (VLOW_BACKEND)
 ├── transcribe_mlx.py  local large-v3 via mlx-whisper
 ├── transcribe_aai.py  cloud universal-3-pro/2 via AssemblyAI SDK
-├── hotkey.py          global + local NSEvent flagsChanged → double-tap detector
+├── stream_aai.py      live AssemblyAI Universal Streaming session (ptt mode)
+├── hotkey.py          double-tap + hold detectors over NSEvent flagsChanged
 ├── overlay.py         borderless non-activating NSPanel
 ├── paste.py           pbcopy + synthesized Cmd+V via CGEvent
 └── replay.py          pynput global Ctrl+Cmd+V → re-paste last text

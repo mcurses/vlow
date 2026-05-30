@@ -10,10 +10,11 @@ from Foundation import NSOperationQueue
 
 from .audio import Recorder
 from .config import load as load_config
-from .hotkey import DoubleTapDetector
+from .hotkey import DoubleTapDetector, HoldDetector
 from .overlay import Overlay
 from .paste import paste
 from .replay import ReplayHotkey
+from .stream_aai import StreamingSession
 from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
 
 
@@ -45,21 +46,39 @@ class VlowApp(rumps.App):
     def __init__(self) -> None:
         super().__init__("vlow", title="🎙", quit_button="Quit")
         self._config = load_config()
+        self._mode = self._config.get("mode", "toggle")
+        if self._mode not in ("toggle", "ptt"):
+            raise ValueError(f"config.mode must be 'toggle' or 'ptt', got {self._mode!r}")
         self._state = State.IDLE
-        self._recorder = Recorder()
+        self._recorder = Recorder()  # used in toggle mode
+        self._stream: StreamingSession | None = None  # used in ptt mode
         self._overlay: Overlay | None = None
         self._last_text = ""
-        self._hotkey = DoubleTapDetector(self._on_double_tap, hotkey=self._config["hotkey"])
         self._replay = ReplayHotkey(lambda: self._last_text)
         self._ready = False
 
+        if self._mode == "ptt":
+            self._hotkey = HoldDetector(
+                self._on_ptt_press,
+                self._on_ptt_release,
+                hotkey=self._config["hotkey"],
+            )
+        else:
+            self._hotkey = DoubleTapDetector(
+                self._on_double_tap,
+                hotkey=self._config["hotkey"],
+            )
+
         # Menubar fallbacks — reliable escape hatches if the hotkey misfires.
+        self._mode_item = rumps.MenuItem(f"Mode: {self._mode}")
+        self._mode_item.set_callback(None)
         self._backend_item = rumps.MenuItem(_backend_label())
-        self._backend_item.set_callback(None)  # display-only
+        self._backend_item.set_callback(None)
         self._stop_item = rumps.MenuItem("⏹ Stop & Transcribe", callback=self._menu_stop)
         self._discard_item = rumps.MenuItem("✕ Discard Recording", callback=self._menu_discard)
         self._replay_item = rumps.MenuItem("↻ Re-paste Last", callback=self._menu_replay)
         self.menu = [
+            self._mode_item,
             self._backend_item,
             None,
             self._stop_item,
@@ -72,13 +91,25 @@ class VlowApp(rumps.App):
         self._setup_timer.start()
 
     def _menu_stop(self, _) -> None:
-        if self._state == State.RECORDING:
+        if self._state != State.RECORDING:
+            return
+        if self._mode == "ptt":
+            self._on_ptt_release()
+        else:
             self._stop_and_transcribe()
 
     def _menu_discard(self, _) -> None:
-        if self._state == State.RECORDING:
+        if self._state != State.RECORDING:
+            return
+        if self._mode == "ptt" and self._stream is not None:
+            try:
+                self._stream.stop()
+            except Exception as e:
+                print(f"discard ptt error: {e}", flush=True)
+            self._stream = None
+        else:
             self._recorder.stop()
-            self._reset()
+        self._reset()
 
     def _menu_replay(self, _) -> None:
         if self._last_text:
@@ -101,19 +132,31 @@ class VlowApp(rumps.App):
 
     def _warmup(self) -> None:
         try:
-            warmup()
+            if self._mode == "ptt":
+                import os as _os
+                if not _os.environ.get("ASSEMBLYAI_API_KEY"):
+                    raise RuntimeError("ASSEMBLYAI_API_KEY required for ptt mode.")
+            else:
+                warmup()
             self._ready = True
             on_main_thread(lambda: self._set_title("🎙"))
             hotkey_label = self._config["hotkey"].replace("_", " ").title()
-            rumps.notification(
-                "vlow ready",
-                f"backend: {backend_name()}",
-                f"Double-tap {hotkey_label} to start dictation.",
-            )
+            if self._mode == "ptt":
+                rumps.notification(
+                    "vlow ready",
+                    "mode: ptt — streaming via AssemblyAI",
+                    f"Hold {hotkey_label} to talk.",
+                )
+            else:
+                rumps.notification(
+                    "vlow ready",
+                    f"backend: {backend_name()}",
+                    f"Double-tap {hotkey_label} to start dictation.",
+                )
         except Exception as e:
             print(f"warmup failed: {e}", flush=True)
             on_main_thread(lambda: self._set_title("⚠️"))
-            rumps.notification("vlow warmup failed", backend_name(), str(e))
+            rumps.notification("vlow warmup failed", self._mode, str(e))
 
     def _set_title(self, t: str) -> None:
         self.title = t
@@ -127,6 +170,49 @@ class VlowApp(rumps.App):
         elif self._state == State.RECORDING:
             self._stop_and_transcribe()
         # ignore taps while transcribing
+
+    def _on_ptt_press(self) -> None:
+        if not self._ready or self._state != State.IDLE:
+            return
+        self._state = State.RECORDING
+        self.title = "🔴"
+        if self._overlay is not None:
+            self._overlay.show("● Listening…")
+        self._stream = StreamingSession(on_partial=self._on_partial)
+        try:
+            self._stream.start()
+        except Exception as e:
+            print(f"ptt start error: {e}", flush=True)
+            rumps.notification("vlow ptt error", "", str(e))
+            self._stream = None
+            self._reset()
+
+    def _on_ptt_release(self) -> None:
+        if self._state != State.RECORDING or self._stream is None:
+            return
+        self._state = State.TRANSCRIBING
+        self.title = "⏳"
+        if self._overlay is not None:
+            self._overlay.update("⏳ Finalizing…")
+        threading.Thread(target=self._finish_ptt, daemon=True).start()
+
+    def _finish_ptt(self) -> None:
+        text = ""
+        session = self._stream
+        try:
+            if session is not None:
+                text = session.stop()
+        except Exception as e:
+            print(f"ptt stop error: {e}", flush=True)
+        finally:
+            self._stream = None
+        on_main_thread(lambda: self._finish(text))
+
+    def _on_partial(self, text: str) -> None:
+        if self._overlay is None:
+            return
+        display = text if len(text) <= 60 else "…" + text[-60:]
+        on_main_thread(lambda: self._overlay.update(f"● {display}"))
 
     def _start_recording(self) -> None:
         self._state = State.RECORDING

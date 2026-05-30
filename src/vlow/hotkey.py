@@ -90,3 +90,70 @@ class DoubleTapDetector:
             else:
                 self._last_press = now
         self._was_pressed = pressed
+
+
+class HoldDetector:
+    """Fire on_press / on_release for a single modifier key — push-to-talk.
+
+    Uses the same global+local NSEvent monitor pair as DoubleTapDetector so
+    presses are seen regardless of which app is active.
+    """
+
+    def __init__(
+        self,
+        on_press: Callable[[], None],
+        on_release: Callable[[], None],
+        hotkey: str = DEFAULT_HOTKEY,
+    ) -> None:
+        if hotkey not in HOTKEYS:
+            raise ValueError(
+                f"Unknown hotkey {hotkey!r}. Choose from: {', '.join(HOTKEYS)}"
+            )
+        self._keycode, self._mask = HOTKEYS[hotkey]
+        self._hotkey_name = hotkey
+        self._on_press = on_press
+        self._on_release = on_release
+        self._was_pressed = False
+        self._global_monitor = None
+        self._local_monitor = None
+
+    def start(self) -> None:
+        self._global_monitor = NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
+            NSEventMaskFlagsChanged, self._handle
+        )
+        self._local_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+            NSEventMaskFlagsChanged, self._handle_local
+        )
+
+    def stop(self) -> None:
+        for m in (self._global_monitor, self._local_monitor):
+            if m is not None:
+                NSEvent.removeMonitor_(m)
+        self._global_monitor = None
+        self._local_monitor = None
+
+    def _handle_local(self, event):
+        self._handle(event)
+        return event
+
+    def _handle(self, event) -> None:
+        if event.keyCode() != self._keycode:
+            return
+        pressed = bool(event.modifierFlags() & self._mask)
+        if DEBUG:
+            print(
+                f"[hotkey-ptt] {self._hotkey_name} {'down' if pressed else 'up'}",
+                flush=True,
+            )
+        if pressed and not self._was_pressed:
+            self._was_pressed = True
+            try:
+                self._on_press()
+            except Exception as e:
+                print(f"on_press error: {e}", flush=True)
+        elif not pressed and self._was_pressed:
+            self._was_pressed = False
+            try:
+                self._on_release()
+            except Exception as e:
+                print(f"on_release error: {e}", flush=True)
