@@ -29,6 +29,9 @@ class StreamingSession:
         self._queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
         self._final_parts: list[str] = []
         self._last_partial: str = ""
+        # Raw PCM16 bytes kept alongside the streaming feed so the session can
+        # be persisted to disk even if the network leg fails.
+        self._raw_chunks: list[bytes] = []
         # Serializes turn-state updates between the SDK's read thread and stop().
         self._lock = threading.Lock()
         self._client = None
@@ -76,7 +79,9 @@ class StreamingSession:
         self._pump_thread.start()
 
     def _audio_cb(self, indata: np.ndarray, frames, time_info, status) -> None:
-        self._queue.put(bytes(indata))
+        chunk = bytes(indata)
+        self._queue.put(chunk)
+        self._raw_chunks.append(chunk)
 
     def _pump(self) -> None:
         def gen():
@@ -112,14 +117,24 @@ class StreamingSession:
         print(f"[stream_aai] error: {error}", flush=True)
 
     def stop(self) -> str:
-        # Order matters: stop the mic so no new chunks queue; sentinel-close
-        # the generator; then terminate the SDK session (which flushes finals).
+        # Order matters: stop the mic so no new chunks queue; persist raw audio
+        # immediately (in case disconnect hangs); sentinel-close the generator;
+        # then terminate the SDK session (which flushes finals).
         if self._stream is not None:
             try:
                 self._stream.stop()
                 self._stream.close()
             finally:
                 self._stream = None
+
+        # Persist before any network work — even a hung disconnect can't lose
+        # the audio now.
+        if self._raw_chunks:
+            try:
+                from .recordings import save_int16_bytes
+                save_int16_bytes(b"".join(self._raw_chunks))
+            except Exception as e:
+                print(f"[stream_aai] save raw failed: {e}", flush=True)
 
         self._queue.put(None)
 

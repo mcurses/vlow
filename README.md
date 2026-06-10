@@ -111,6 +111,34 @@ fallbacks:
 - `✕ Discard Recording` — drop the current buffer, no paste
 - `↻ Re-paste Last` — same as Ctrl+Cmd+V
 
+## Recovery — last recording is always on disk
+
+Every session — batch or streaming — writes its raw audio to
+`~/Library/Application Support/vlow/last_recording.wav` before any
+network round-trip. If MLX crashes, the WebSocket hangs, or you hit
+"Discard" by mistake, the audio is still there.
+
+- **Reveal it** from the menubar dropdown → `📁 Reveal Last Recording`,
+  or open the file directly:
+  ```bash
+  open "$HOME/Library/Application Support/vlow/last_recording.wav"
+  ```
+- **Re-transcribe by hand** with any backend, e.g.:
+  ```bash
+  .venv/bin/python -c "
+  import mlx_whisper
+  r = mlx_whisper.transcribe(
+      '$HOME/Library/Application Support/vlow/last_recording.wav',
+      path_or_hf_repo='mlx-community/whisper-large-v3-mlx',
+  )
+  print(r['text'])
+  "
+  ```
+
+Only the latest session is kept; each new recording overwrites the
+previous file (written atomically: tmp + rename, so it's always either
+the old valid recording or the new complete one).
+
 ## CLI
 
 ```bash

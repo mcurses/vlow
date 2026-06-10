@@ -13,6 +13,7 @@ from .config import load as load_config
 from .hotkey import DoubleTapDetector, HoldDetector, TapHoldDetector
 from .overlay import Overlay
 from .paste import paste
+from .recordings import LATEST_PATH as RECORDING_PATH, reveal_in_finder, save_float32
 from .replay import ReplayHotkey
 from .stream_aai import StreamingSession
 from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
@@ -85,6 +86,7 @@ class VlowApp(rumps.App):
         self._stop_item = rumps.MenuItem("⏹ Stop & Transcribe", callback=self._menu_stop)
         self._discard_item = rumps.MenuItem("✕ Discard Recording", callback=self._menu_discard)
         self._replay_item = rumps.MenuItem("↻ Re-paste Last", callback=self._menu_replay)
+        self._reveal_item = rumps.MenuItem("📁 Reveal Last Recording", callback=self._menu_reveal)
         self.menu = [
             self._mode_item,
             self._backend_item,
@@ -92,6 +94,7 @@ class VlowApp(rumps.App):
             self._stop_item,
             self._discard_item,
             self._replay_item,
+            self._reveal_item,
             None,
         ]
 
@@ -119,6 +122,14 @@ class VlowApp(rumps.App):
     def _menu_replay(self, _) -> None:
         if self._last_text:
             paste(self._last_text)
+
+    def _menu_reveal(self, _) -> None:
+        if not reveal_in_finder():
+            rumps.notification(
+                "vlow",
+                "no recording yet",
+                f"{RECORDING_PATH} doesn't exist — record something first.",
+            )
 
     def _deferred_setup(self, sender) -> None:
         sender.stop()
@@ -269,6 +280,12 @@ class VlowApp(rumps.App):
         if self._overlay is not None:
             self._overlay.update("⏳ Transcribing…")
         audio = self._recorder.stop()
+        # Persist the raw audio before transcribing so a crash in MLX / AAI
+        # never loses the recording.
+        try:
+            save_float32(audio)
+        except Exception as e:
+            print(f"save raw recording failed: {e}", flush=True)
         threading.Thread(target=self._do_transcribe, args=(audio,), daemon=True).start()
 
     def _do_transcribe(self, audio) -> None:
