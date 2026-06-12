@@ -30,12 +30,21 @@ def test_record(seconds: float = 4.0) -> None:
 
 
 def main() -> None:
-    load_config()  # populate os.environ from .env + config.toml
+    import time
+    print(f"[vlow {time.strftime('%H:%M:%S')}] starting…", file=sys.stderr, flush=True)
+    load_config()
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         secs = float(sys.argv[2]) if len(sys.argv) > 2 else 4.0
         test_record(secs)
         return
-    VlowApp().run()
+    app = VlowApp()
+    print(
+        f"[vlow {time.strftime('%H:%M:%S')}] entering runloop — "
+        f"setup will fire ~0.3s later",
+        file=sys.stderr,
+        flush=True,
+    )
+    app.run()
 
 
 if __name__ == "__main__":

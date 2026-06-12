@@ -1,5 +1,11 @@
+import sys
 import threading
+import time
 from enum import Enum
+
+
+def _log(msg: str) -> None:
+    print(f"[vlow {time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
 
 import rumps
 from ApplicationServices import (
@@ -186,28 +192,50 @@ class VlowApp(rumps.App):
 
     def _deferred_setup(self, sender) -> None:
         sender.stop()
-        trusted = request_accessibility()
+        _log(f"deferred setup: mode={self._mode} hotkey={self._config['hotkey']}")
+        try:
+            trusted = request_accessibility()
+        except Exception as e:
+            _log(f"accessibility check failed: {e}")
+            trusted = False
+        _log(f"accessibility trusted={trusted}")
         if not trusted:
             rumps.notification(
                 "vlow needs Accessibility",
                 "",
-                "Grant Accessibility to your terminal in System Settings, then relaunch vlow.",
+                "Grant Accessibility in System Settings → Privacy & Security, then relaunch vlow.",
             )
-        self._overlay = Overlay()
-        self._hotkey.start()
-        self._replay.start()
+        try:
+            self._overlay = Overlay()
+            _log("overlay built")
+        except Exception as e:
+            _log(f"overlay build failed: {e}")
+        try:
+            self._hotkey.start()
+            _log(f"hotkey monitor started ({type(self._hotkey).__name__})")
+        except Exception as e:
+            _log(f"hotkey start failed: {e}")
+        try:
+            self._replay.start()
+            _log("replay hotkey started")
+        except Exception as e:
+            _log(f"replay start failed: {e}")
         self.title = "🎙…"
         threading.Thread(target=self._warmup, daemon=True).start()
+        _log("warmup thread spawned")
 
     def _warmup(self) -> None:
         import os as _os
         try:
+            _log(f"warmup start (mode={self._mode}, backend={backend_name()})")
+            t0 = time.time()
             if self._mode == "ptt":
                 if not _os.environ.get("ASSEMBLYAI_API_KEY"):
                     raise RuntimeError("ASSEMBLYAI_API_KEY required for ptt mode.")
             else:
                 # toggle mode: mlx for batch; aai key needed for the hold gesture.
                 warmup()
+            _log(f"warmup done in {time.time()-t0:.1f}s — hotkey is live")
             self._ready = True
             on_main_thread(lambda: self._set_title("🎙"))
             hotkey_label = self._config["hotkey"].replace("_", " ").title()
