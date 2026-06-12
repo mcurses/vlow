@@ -111,6 +111,20 @@ fallbacks:
 - `✕ Discard Recording` — drop the current buffer, no paste
 - `↻ Re-paste Last` — same as Ctrl+Cmd+V
 
+## Input device
+
+vlow follows the macOS system default input by default. PortAudio
+caches its device list at import, so devices that connect *after* vlow
+launched (e.g. a Bluetooth headset) would normally be invisible — we
+re-scan on every recording start to compensate.
+
+Menubar dropdown → `🎙 Input Device` lists every detected input,
+including a system-default option and a `⟳ Refresh Devices` action for
+when a device appears mid-session. Selecting a specific device pins it
+for all subsequent sessions until you switch back to "Use System
+Default" or quit the app (the choice is in-memory only — relaunch
+returns to system default).
+
 ## Recovery — last recording is always on disk
 
 Every session — batch or streaming — writes its raw audio to

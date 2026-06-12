@@ -23,9 +23,11 @@ class StreamingSession:
         self,
         on_partial: Optional[Callable[[str], None]] = None,
         on_final: Optional[Callable[[str], None]] = None,
+        device: Optional[int] = None,
     ) -> None:
         self._on_partial = on_partial or (lambda _: None)
         self._on_final = on_final or (lambda _: None)
+        self._device = device  # None → system default at start()
         self._queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
         self._final_parts: list[str] = []
         self._last_partial: str = ""
@@ -63,6 +65,10 @@ class StreamingSession:
             )
         )
 
+        # Re-scan so a freshly-connected mic (BT headset etc.) is reachable.
+        from .audio import refresh_devices
+        refresh_devices()
+
         # Audio capture → queue. dtype=int16 because AAI wants raw PCM16.
         self._stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
@@ -70,6 +76,7 @@ class StreamingSession:
             dtype="int16",
             blocksize=CHUNK_SAMPLES,
             callback=self._audio_cb,
+            device=self._device,
         )
         self._stream.start()
 

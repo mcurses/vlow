@@ -8,7 +8,7 @@ from ApplicationServices import (
 )
 from Foundation import NSOperationQueue
 
-from .audio import Recorder
+from .audio import Recorder, default_input_name, list_input_devices, refresh_devices
 from .config import load as load_config
 from .hotkey import DoubleTapDetector, HoldDetector, TapHoldDetector
 from .overlay import Overlay
@@ -56,6 +56,7 @@ class VlowApp(rumps.App):
         if self._mode not in VALID_MODES:
             raise ValueError(f"config.mode must be one of {VALID_MODES}, got {self._mode!r}")
         self._state = State.IDLE
+        self._input_device: int | None = None  # None → follow system default
         self._recorder = Recorder()
         self._stream: StreamingSession | None = None
         self._pasted_in_session = False
@@ -87,9 +88,12 @@ class VlowApp(rumps.App):
         self._discard_item = rumps.MenuItem("✕ Discard Recording", callback=self._menu_discard)
         self._replay_item = rumps.MenuItem("↻ Re-paste Last", callback=self._menu_replay)
         self._reveal_item = rumps.MenuItem("📁 Reveal Last Recording", callback=self._menu_reveal)
+        self._device_menu = rumps.MenuItem("🎙 Input Device")
+        self._populate_device_menu()
         self.menu = [
             self._mode_item,
             self._backend_item,
+            self._device_menu,
             None,
             self._stop_item,
             self._discard_item,
@@ -97,6 +101,55 @@ class VlowApp(rumps.App):
             self._reveal_item,
             None,
         ]
+
+    def _populate_device_menu(self) -> None:
+        try:
+            self._device_menu.clear()
+        except Exception:
+            pass
+        # Item 0: follow system default.
+        default_label = (
+            "✓ Use System Default" if self._input_device is None else "  Use System Default"
+        )
+        self._device_menu.add(
+            rumps.MenuItem(default_label, callback=self._select_default_device)
+        )
+        # One item per discovered input device.
+        for d in list_input_devices():
+            tags = []
+            if d["is_default"]:
+                tags.append("system default")
+            tag_str = f"  ({', '.join(tags)})" if tags else ""
+            checked = "✓ " if self._input_device == d["index"] else "  "
+            title = f"{checked}{d['name']}{tag_str}"
+            self._device_menu.add(
+                rumps.MenuItem(title, callback=self._make_device_selector(d["index"]))
+            )
+        self._device_menu.add(None)  # separator
+        self._device_menu.add(
+            rumps.MenuItem("⟳ Refresh Devices", callback=self._menu_refresh_devices)
+        )
+
+    def _make_device_selector(self, idx: int):
+        def cb(_sender):
+            self._input_device = idx
+            self._populate_device_menu()
+            rumps.notification("vlow", "input device", f"Pinned to device #{idx}")
+        return cb
+
+    def _select_default_device(self, _) -> None:
+        self._input_device = None
+        self._populate_device_menu()
+        rumps.notification(
+            "vlow",
+            "input device",
+            f"Following system default ({default_input_name()})",
+        )
+
+    def _menu_refresh_devices(self, _) -> None:
+        refresh_devices()
+        self._populate_device_menu()
+        rumps.notification("vlow", "input devices", "Refreshed device list")
 
         self._setup_timer = rumps.Timer(self._deferred_setup, 0.3)
         self._setup_timer.start()
@@ -208,6 +261,7 @@ class VlowApp(rumps.App):
         self._stream = StreamingSession(
             on_partial=self._on_stream_partial,
             on_final=self._on_stream_final,
+            device=self._input_device,
         )
         try:
             self._stream.start()
@@ -268,10 +322,14 @@ class VlowApp(rumps.App):
         self.title = "🔴"
         if self._overlay is not None:
             self._overlay.show("● Listening…")
+        # Re-create the Recorder each session so device selection (and any
+        # newly-attached BT mic) takes effect.
+        self._recorder = Recorder(device=self._input_device)
         try:
             self._recorder.start()
         except Exception as e:
             print(f"failed to start audio: {e}")
+            rumps.notification("vlow audio error", "", str(e))
             self._reset()
 
     def _stop_and_transcribe(self) -> None:
