@@ -39,8 +39,7 @@ def main() -> None:
         return
     app = VlowApp()
     print(
-        f"[vlow {time.strftime('%H:%M:%S')}] entering runloop — "
-        f"setup will fire ~0.3s later",
+        f"[vlow {time.strftime('%H:%M:%S')}] entering runloop",
         file=sys.stderr,
         flush=True,
     )

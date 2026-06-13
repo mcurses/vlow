@@ -108,6 +108,11 @@ class VlowApp(rumps.App):
             None,
         ]
 
+        # NSEvent monitor + NSPanel + threads don't actually need NSApp.run()
+        # to be active; both rumps.Timer and NSOperationQueue main-queue
+        # one-shots were never firing on macOS 26, so run setup inline.
+        self._deferred_setup(None)
+
     def _populate_device_menu(self) -> None:
         try:
             self._device_menu.clear()
@@ -156,14 +161,6 @@ class VlowApp(rumps.App):
         refresh_devices()
         self._populate_device_menu()
         rumps.notification("vlow", "input devices", "Refreshed device list")
-
-        # Schedule one-shot setup on the main runloop. rumps.Timer was
-        # silently never firing on macOS 26 — using NSOperationQueue keeps
-        # things on the main thread and runs as soon as the runloop is alive.
-        NSOperationQueue.mainQueue().addOperationWithBlock_(self._run_deferred_setup)
-
-    def _run_deferred_setup(self) -> None:
-        self._deferred_setup(None)
 
     def _menu_stop(self, _) -> None:
         if self._state == State.RECORDING:
