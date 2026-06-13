@@ -157,8 +157,13 @@ class VlowApp(rumps.App):
         self._populate_device_menu()
         rumps.notification("vlow", "input devices", "Refreshed device list")
 
-        self._setup_timer = rumps.Timer(self._deferred_setup, 0.3)
-        self._setup_timer.start()
+        # Schedule one-shot setup on the main runloop. rumps.Timer was
+        # silently never firing on macOS 26 — using NSOperationQueue keeps
+        # things on the main thread and runs as soon as the runloop is alive.
+        NSOperationQueue.mainQueue().addOperationWithBlock_(self._run_deferred_setup)
+
+    def _run_deferred_setup(self) -> None:
+        self._deferred_setup(None)
 
     def _menu_stop(self, _) -> None:
         if self._state == State.RECORDING:
@@ -190,8 +195,7 @@ class VlowApp(rumps.App):
                 f"{RECORDING_PATH} doesn't exist — record something first.",
             )
 
-    def _deferred_setup(self, sender) -> None:
-        sender.stop()
+    def _deferred_setup(self, _sender) -> None:
         _log(f"deferred setup: mode={self._mode} hotkey={self._config['hotkey']}")
         try:
             trusted = request_accessibility()
