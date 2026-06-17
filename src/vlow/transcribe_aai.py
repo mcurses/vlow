@@ -4,18 +4,16 @@ import wave
 
 import numpy as np
 
+from .config import known_words
+
 MODELS = ["universal-3-pro", "universal-2"]
 MIN_SAMPLES = 1600
 SAMPLE_RATE = 16000
 
-_config = None
 
-
-def _get_config():
-    """Lazily build the AssemblyAI TranscriptionConfig and verify the key."""
-    global _config
-    if _config is not None:
-        return _config
+def _build_config():
+    """Build a fresh AssemblyAI TranscriptionConfig per call so changes to
+    known_words in config.toml take effect without restarting vlow."""
     import assemblyai as aai
 
     key = os.environ.get("ASSEMBLYAI_API_KEY")
@@ -25,26 +23,28 @@ def _get_config():
         )
     aai.settings.api_key = key
 
-    # Language: explicit override via VLOW_AAI_LANGUAGE, otherwise let
-    # AssemblyAI auto-detect (set language_code=None, language_detection=True).
+    extras: dict = {"speech_models": MODELS}
     lang = os.environ.get("VLOW_AAI_LANGUAGE")
     if lang:
-        _config = aai.TranscriptionConfig(
-            speech_models=MODELS,
-            language_code=lang,
-        )
+        extras["language_code"] = lang
     else:
-        _config = aai.TranscriptionConfig(
-            speech_models=MODELS,
-            language_detection=True,
-        )
-    return _config
+        extras["language_detection"] = True
+
+    words = known_words()
+    if words:
+        # keyterms_prompt biases the universal-3 models; word_boost covers the
+        # universal-2 fallback. Both can be set safely.
+        extras["keyterms_prompt"] = words
+        extras["word_boost"] = words
+        extras["boost_param"] = "high"
+
+    return aai.TranscriptionConfig(**extras)
 
 
 def warmup() -> None:
     # No network — just import the SDK and verify the API key is set so a
     # missing key fails fast at app startup instead of mid-dictation.
-    _get_config()
+    _build_config()
 
 
 def transcribe(audio: np.ndarray) -> str:
@@ -52,7 +52,7 @@ def transcribe(audio: np.ndarray) -> str:
         return ""
     import assemblyai as aai
 
-    config = _get_config()
+    config = _build_config()
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         path = f.name
     try:

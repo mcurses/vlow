@@ -55,7 +55,16 @@ mode = "toggle"             # toggle (default; double-tap + hold) or ptt (hold-o
 backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
 auto_threshold_sec = 60     # used when backend = "auto"
 aai_language = "de"         # omit for AssemblyAI auto-detection
+known_words = ["EMMA Studio", "vlow"]   # bias all backends toward these names
 ```
+
+`known_words` is applied everywhere transcription happens:
+- MLX gets a Whisper `initial_prompt` (`"Words and names that may appear: …"`).
+- AssemblyAI pre-recorded gets `keyterms_prompt` *and* `word_boost` (the latter for the universal-2 fallback model) with `boost_param="high"`.
+- AssemblyAI streaming gets `keyterms_prompt` in the `StreamingParameters`.
+
+The list is re-read on every session start, so editing `config.toml`
+takes effect without relaunching vlow.
 
 ## First launch
 

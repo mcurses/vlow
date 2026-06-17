@@ -57,13 +57,16 @@ class StreamingSession:
         self._client = StreamingClient(StreamingClientOptions(api_key=key))
         self._client.on(StreamingEvents.Turn, self._on_turn)
         self._client.on(StreamingEvents.Error, self._on_error)
-        self._client.connect(
-            StreamingParameters(
-                sample_rate=SAMPLE_RATE,
-                speech_model=SPEECH_MODEL,
-                format_turns=True,
-            )
-        )
+        from .config import known_words
+        params = {
+            "sample_rate": SAMPLE_RATE,
+            "speech_model": SPEECH_MODEL,
+            "format_turns": True,
+        }
+        words = known_words()
+        if words:
+            params["keyterms_prompt"] = words
+        self._client.connect(StreamingParameters(**params))
 
         # Re-scan so a freshly-connected mic (BT headset etc.) is reachable.
         from .audio import refresh_devices

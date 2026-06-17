@@ -10,7 +10,17 @@ ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 _DEFAULTS = {
     "hotkey": "fn",
     "mode": "toggle",  # "toggle" (double-tap) or "ptt" (hold-to-talk)
+    "known_words": [],  # bias all backends toward these names/terms
 }
+
+
+def known_words() -> list[str]:
+    """Return the configured list of names / terms to bias transcription
+    toward. Always re-reads config so users can edit config.toml without
+    restarting (relevant for streaming which constructs config per session)."""
+    conf = load()
+    raw = conf.get("known_words") or []
+    return [str(w).strip() for w in raw if str(w).strip()]
 
 
 def load_dotenv() -> None:
