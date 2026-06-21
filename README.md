@@ -134,6 +134,56 @@ for all subsequent sessions until you switch back to "Use System
 Default" or quit the app (the choice is in-memory only — relaunch
 returns to system default).
 
+## Run as a background service (launchd)
+
+Install a per-user LaunchAgent so vlow starts at every login and
+restarts automatically if it crashes:
+
+```bash
+scripts/install-launchagent.sh
+```
+
+The script builds a minimal `dist/vlow.app` bundle and registers it
+with launchd. Two reasons for the bundle:
+
+- macOS shows `vlow` in `System Settings → Privacy & Security →
+  Accessibility` / `Microphone` instead of the raw `python3.12`
+  binary. (CFBundleName lives in `dist/vlow.app/Contents/Info.plist`.)
+- LSUIElement is set, so vlow doesn't take a Dock icon when launched
+  via the bundle.
+
+Logs land in standard macOS locations and are visible in Console.app
+under "Log Reports":
+
+- `~/Library/Logs/vlow/vlow.err` — startup phases (`[vlow HH:MM:SS] …`)
+  and Python stderr.
+- `~/Library/Logs/vlow/vlow.log` — MLX / AssemblyAI stdout.
+
+```bash
+tail -F ~/Library/Logs/vlow/vlow.err           # live log tail
+launchctl print gui/$UID/com.vlow              # status
+launchctl kickstart -k gui/$UID/com.vlow       # force-restart
+scripts/uninstall-launchagent.sh               # remove agent (keeps logs)
+```
+
+KeepAlive is set to restart only on `Crashed`, *not* on
+`SuccessfulExit` — so clicking `Quit` from the menubar actually quits
+until next login, while a crash is auto-recovered.
+
+### First-time Accessibility under launchd
+
+When vlow runs as a LaunchAgent the underlying python binary is still
+`/Users/max/.../.venv/bin/python`, even though the bundle is named
+`vlow`. macOS may ask you to re-grant Accessibility the first time:
+
+1. `System Settings → Privacy & Security → Accessibility`
+2. Find `python3.12` (or `vlow` once the bundle is registered), toggle
+   off then back on.
+3. `launchctl kickstart -k gui/$UID/com.vlow` to restart with the
+   refreshed permission.
+4. `tail ~/Library/Logs/vlow/vlow.err` should now print
+   `accessibility trusted=True`.
+
 ## Recovery — last recording is always on disk
 
 Every session — batch or streaming — writes its raw audio to
