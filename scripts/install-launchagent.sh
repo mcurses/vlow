@@ -74,6 +74,13 @@ cat > "$PLIST" <<EOF
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- The mlx-whisper model is already in ~/.cache/huggingface/hub/.
+             Without these flags huggingface_hub tries to phone home on every
+             warmup; under launchd that connect call hangs indefinitely. -->
+        <key>HF_HUB_OFFLINE</key>
+        <string>1</string>
+        <key>TRANSFORMERS_OFFLINE</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>
