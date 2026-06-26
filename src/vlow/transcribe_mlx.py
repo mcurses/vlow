@@ -24,7 +24,17 @@ def warmup() -> None:
 def transcribe(audio: np.ndarray) -> str:
     if audio.size < MIN_SAMPLES:
         return ""
-    kwargs = {"path_or_hf_repo": MODEL, "verbose": False}
+    # Anti-repetition-loop settings. Whisper's autoregressive decoder is prone to
+    # falling into "Das ist die Situation. Das ist die Situation. …" style loops,
+    # especially on German/mixed-language audio with thinking pauses. The defaults
+    # let one bad 30s window poison every following window via the prompt feedback.
+    kwargs = {
+        "path_or_hf_repo": MODEL,
+        "verbose": False,
+        "condition_on_previous_text": False,
+        "compression_ratio_threshold": 2.0,
+        "hallucination_silence_threshold": 2.0,
+    }
     prompt = _initial_prompt()
     if prompt:
         kwargs["initial_prompt"] = prompt
