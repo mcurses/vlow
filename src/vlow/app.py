@@ -18,7 +18,13 @@ from .audio import Recorder, default_input_name, list_input_devices, refresh_dev
 from .config import load as load_config
 from .hotkey import DoubleTapDetector, HoldDetector, TapHoldDetector
 from .overlay import Overlay
-from .paste import paste
+from .paste import (
+    POST_PASTE_WAIT_SEC,
+    paste,
+    paste_no_restore,
+    restore_clipboard,
+    snapshot_clipboard,
+)
 from .recordings import LATEST_PATH as RECORDING_PATH, reveal_in_finder, save_float32
 from .replay import ReplayHotkey
 from .stream_aai import StreamingSession
@@ -66,6 +72,7 @@ class VlowApp(rumps.App):
         self._recorder = Recorder()
         self._stream: StreamingSession | None = None
         self._pasted_in_session = False
+        self._preserved_clipboard: list[dict[str, bytes]] | None = None
         self._overlay: Overlay | None = None
         self._last_text = ""
         self._replay = ReplayHotkey(lambda: self._last_text)
@@ -284,6 +291,9 @@ class VlowApp(rumps.App):
         self._state = State.STREAMING
         self._pasted_in_session = False
         self._last_text = ""
+        # Preserve the user's clipboard for the whole streaming session so we
+        # don't flicker it back-and-forth between finalized turns.
+        self._preserved_clipboard = snapshot_clipboard()
         self.title = "🔴"
         if self._overlay is not None:
             self._overlay.show("● Streaming…")
@@ -325,6 +335,17 @@ class VlowApp(rumps.App):
             self._overlay.hide()
         self.title = "🎙"
         self._state = State.IDLE
+        self._restore_preserved_clipboard()
+
+    def _restore_preserved_clipboard(self) -> None:
+        snap = self._preserved_clipboard
+        if snap is None:
+            return
+        self._preserved_clipboard = None
+        # Give the target app a beat to finish consuming the last paste
+        # before we overwrite the pasteboard with the restored contents.
+        time.sleep(POST_PASTE_WAIT_SEC)
+        restore_clipboard(snap)
 
     def _on_stream_partial(self, text: str) -> None:
         if self._overlay is None:
@@ -341,7 +362,7 @@ class VlowApp(rumps.App):
             chunk = text
             self._pasted_in_session = True
         try:
-            paste(chunk)
+            paste_no_restore(chunk)
         except Exception as e:
             print(f"live paste error: {e}", flush=True)
         self._last_text = (self._last_text + " " + text).strip() if self._last_text else text
@@ -397,3 +418,4 @@ class VlowApp(rumps.App):
             self._overlay.hide()
         self.title = "🎙"
         self._state = State.IDLE
+        self._restore_preserved_clipboard()
