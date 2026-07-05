@@ -7,7 +7,11 @@ build/
 *.egg-info/
 .DS_Store
 .python-version
-.claude/
+.claude/*
+!.claude/skills/
 .env
 .env.*
 !.env.example
+
+# Exported agent conversations (packed into the zip by the repo-archive skill)
+agent-conversations/
