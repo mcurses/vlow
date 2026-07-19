@@ -1,5 +1,7 @@
 import sys
 
+from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+
 from .app import VlowApp
 from .config import load as load_config
 
@@ -37,6 +39,14 @@ def main() -> None:
         secs = float(sys.argv[2]) if len(sys.argv) > 2 else 4.0
         test_record(secs)
         return
+    # The .app bundle sets LSUIElement, but Contents/MacOS/vlow execs into the
+    # venv interpreter — so the running executable is Homebrew's Python.app and
+    # macOS reads *its* Info.plist, which has no LSUIElement. Result: a Dock
+    # rocket for a menu-bar-only daemon. Set the policy at runtime instead,
+    # where bundle identity doesn't matter. Must happen before the runloop.
+    NSApplication.sharedApplication().setActivationPolicy_(
+        NSApplicationActivationPolicyAccessory
+    )
     app = VlowApp()
     print(
         f"[vlow {time.strftime('%H:%M:%S')}] entering runloop",
