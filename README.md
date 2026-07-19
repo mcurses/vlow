@@ -7,6 +7,12 @@ API key, handles per-token German/English code-switching.
 
 Apple Silicon only (MLX). Tested on macOS 26.
 
+> The "no network" guarantee holds only for the default `mlx` backend. If you
+> set `VLOW_BACKEND=auto` in your `.env`, every recording longer than
+> `VLOW_AUTO_THRESHOLD_SEC` (default 60s) is uploaded to AssemblyAI — and
+> ordinary dictation crosses a minute often, so that is a large share of them,
+> not an occasional edge case. See [Transcription backends](#transcription-backends).
+
 ## Install
 
 Requires [`uv`](https://docs.astral.sh/uv/) and `ffmpeg`.
