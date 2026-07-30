@@ -1,4 +1,5 @@
 import os
+import time
 
 import numpy as np
 
@@ -55,7 +56,23 @@ def warmup() -> None:
 
 def transcribe(audio: np.ndarray) -> str:
     chosen = _backend_for_audio(audio)
+    duration = audio.size / SAMPLE_RATE
     if backend_name() == "auto":
-        duration = audio.size / SAMPLE_RATE
         print(f"[vlow] auto: {duration:.1f}s → {chosen}", flush=True)
-    return _module(chosen).transcribe(audio)
+    # Log how long it actually took, not just which backend ran. Without this
+    # a slow dictation is unattributable: the mlx path can re-decode a window
+    # up to 6 times on low confidence (~6x swing), while the assemblyai path
+    # is a network upload whose latency has nothing to do with the model.
+    # xN is speed relative to realtime — higher is faster.
+    start = time.monotonic()
+    try:
+        return _module(chosen).transcribe(audio)
+    finally:
+        elapsed = time.monotonic() - start
+        # Suppress the ratio on a near-instant return: that means the backend
+        # raised, and a five-digit speedup in the log is just noise.
+        speed = f" (x{duration / elapsed:.1f} realtime)" if elapsed >= 0.1 else ""
+        print(
+            f"[vlow] {chosen}: {elapsed:.1f}s for {duration:.1f}s audio{speed}",
+            flush=True,
+        )
