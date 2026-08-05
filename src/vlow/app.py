@@ -16,7 +16,8 @@ from Foundation import NSOperationQueue
 
 from .audio import Recorder, default_input_name, list_input_devices, refresh_devices
 from .config import load as load_config
-from .hotkey import DoubleTapDetector, HoldDetector, TapHoldDetector
+from .diag import Watchdog
+from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetector
 from .overlay import Overlay
 from .paste import (
     POST_PASTE_WAIT_SEC,
@@ -170,12 +171,14 @@ class VlowApp(rumps.App):
         rumps.notification("vlow", "input devices", "Refreshed device list")
 
     def _menu_stop(self, _) -> None:
+        _log(f"menu: stop & transcribe (state={self._state.value})")
         if self._state == State.RECORDING:
             self._stop_and_transcribe()
         elif self._state == State.STREAMING:
             self._stop_stream()
 
     def _menu_discard(self, _) -> None:
+        _log(f"menu: discard (state={self._state.value})")
         if self._state == State.RECORDING:
             self._recorder.stop()
             self._reset()
@@ -231,6 +234,31 @@ class VlowApp(rumps.App):
         self.title = "🎙…"
         threading.Thread(target=self._warmup, daemon=True).start()
         _log("warmup thread spawned")
+        self._watchdog = Watchdog(
+            on_main=on_main_thread,
+            probe_main=self._probe_main,
+            get_state=lambda: self._state.value,
+            is_idle=lambda: self._state is State.IDLE,
+        )
+        self._watchdog.start()
+        _log("watchdog started (ping 60s, heartbeat ~5min, `kill -USR1` dumps stacks)")
+
+    def _probe_main(self) -> str:
+        """Runs on the main thread via the watchdog ping; summarizes UI health."""
+        bits = [f"title={self.title!r}", EVENT_STATS.summary()]
+        try:
+            item = self._nsapp.nsstatusitem
+            button = item.button()
+            window = button.window() if button is not None else None
+            win_no = int(window.windowNumber()) if window is not None else None
+            bits.append(f"statusitem: win={win_no} visible={bool(item.isVisible())}")
+        except Exception as e:
+            bits.append(f"statusitem: probe failed ({e})")
+        return " ".join(bits)
+
+    def _to_state(self, new: "State", why: str) -> None:
+        _log(f"state: {self._state.value} → {new.value} ({why})")
+        self._state = new
 
     def _warmup(self) -> None:
         import os as _os
@@ -281,14 +309,17 @@ class VlowApp(rumps.App):
             self._start_recording()
         elif self._state == State.RECORDING:
             self._stop_and_transcribe()
-        # ignore taps while transcribing or streaming
+        else:
+            # ignore taps while transcribing or streaming
+            _log(f"double-tap ignored (state={self._state.value})")
 
     def _start_stream(self) -> None:
         # Hold gesture can fire while the user is also in a batch session —
         # ignore unless we're idle.
         if not self._ready or self._state != State.IDLE:
+            _log(f"hold ignored (ready={self._ready}, state={self._state.value})")
             return
-        self._state = State.STREAMING
+        self._to_state(State.STREAMING, "hold start")
         self._pasted_in_session = False
         self._last_text = ""
         # Preserve the user's clipboard for the whole streaming session so we
@@ -313,7 +344,7 @@ class VlowApp(rumps.App):
     def _stop_stream(self) -> None:
         if self._state != State.STREAMING or self._stream is None:
             return
-        self._state = State.FINALIZING
+        self._to_state(State.FINALIZING, "hold end")
         self.title = "⏳"
         if self._overlay is not None:
             self._overlay.update("⏳ Finalizing…")
@@ -334,7 +365,7 @@ class VlowApp(rumps.App):
         if self._overlay is not None:
             self._overlay.hide()
         self.title = "🎙"
-        self._state = State.IDLE
+        self._to_state(State.IDLE, "stream finished")
         self._restore_preserved_clipboard()
 
     def _restore_preserved_clipboard(self) -> None:
@@ -368,7 +399,7 @@ class VlowApp(rumps.App):
         self._last_text = (self._last_text + " " + text).strip() if self._last_text else text
 
     def _start_recording(self) -> None:
-        self._state = State.RECORDING
+        self._to_state(State.RECORDING, "double-tap")
         self.title = "🔴"
         if self._overlay is not None:
             self._overlay.show("● Listening…")
@@ -383,7 +414,7 @@ class VlowApp(rumps.App):
             self._reset()
 
     def _stop_and_transcribe(self) -> None:
-        self._state = State.TRANSCRIBING
+        self._to_state(State.TRANSCRIBING, "double-tap stop")
         self.title = "⏳"
         if self._overlay is not None:
             self._overlay.update("⏳ Transcribing…")
@@ -408,7 +439,7 @@ class VlowApp(rumps.App):
         if self._overlay is not None:
             self._overlay.hide()
         self.title = "🎙"
-        self._state = State.IDLE
+        self._to_state(State.IDLE, f"transcription done, {len(text)} chars")
         if text:
             self._last_text = text
             paste(text)
@@ -417,5 +448,5 @@ class VlowApp(rumps.App):
         if self._overlay is not None:
             self._overlay.hide()
         self.title = "🎙"
-        self._state = State.IDLE
+        self._to_state(State.IDLE, "reset")
         self._restore_preserved_clipboard()

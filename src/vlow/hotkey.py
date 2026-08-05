@@ -14,6 +14,32 @@ def _on_main_thread(fn: Callable[[], None]) -> None:
 
 NSEventMaskFlagsChanged = 1 << 12
 
+
+class _EventStats:
+    """Liveness counters for the NSEvent monitors, read by the watchdog
+    heartbeat. If `last` keeps growing while the user is typing, the monitors
+    are no longer receiving events (the 2026-08-05 wedge symptom)."""
+
+    def __init__(self) -> None:
+        self.total = 0
+        self.hotkey = 0
+        self._last_seen = 0.0
+
+    def note(self, is_hotkey: bool) -> None:
+        self.total += 1
+        if is_hotkey:
+            self.hotkey += 1
+        self._last_seen = time.monotonic()
+
+    def summary(self) -> str:
+        if self.total == 0:
+            return "flags-events: none seen yet"
+        age = time.monotonic() - self._last_seen
+        return f"flags-events: total={self.total} hotkey={self.hotkey} last={age:.0f}s ago"
+
+
+EVENT_STATS = _EventStats()
+
 HOTKEYS = {
     "fn":        (63, 1 << 23),  # NSEventModifierFlagFunction
     "right_cmd": (54, 1 << 20),  # NSEventModifierFlagCommand
@@ -77,6 +103,7 @@ class DoubleTapDetector:
         return event
 
     def _handle(self, event) -> None:
+        EVENT_STATS.note(event.keyCode() == self._keycode)
         if event.keyCode() != self._keycode:
             return
         pressed = bool(event.modifierFlags() & self._mask)
@@ -162,6 +189,7 @@ class TapHoldDetector:
         return event
 
     def _handle(self, event) -> None:
+        EVENT_STATS.note(event.keyCode() == self._keycode)
         if event.keyCode() != self._keycode:
             return
         pressed = bool(event.modifierFlags() & self._mask)
@@ -290,6 +318,7 @@ class HoldDetector:
         return event
 
     def _handle(self, event) -> None:
+        EVENT_STATS.note(event.keyCode() == self._keycode)
         if event.keyCode() != self._keycode:
             return
         pressed = bool(event.modifierFlags() & self._mask)

@@ -33,7 +33,12 @@ def test_record(seconds: float = 4.0) -> None:
 
 def main() -> None:
     import time
+
+    from .diag import install_power_logging, install_signal_dump
+
     print(f"[vlow {time.strftime('%H:%M:%S')}] starting…", file=sys.stderr, flush=True)
+    install_signal_dump()
+    install_power_logging()
     load_config()
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         secs = float(sys.argv[2]) if len(sys.argv) > 2 else 4.0
