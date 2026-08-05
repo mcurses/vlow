@@ -267,6 +267,26 @@ Roughly 8–10× realtime on M-series for `large-v3`.
 - **Paste produces nothing.** Some apps suppress synthesized `Cmd+V`.
   Falls back: the transcript is still in your clipboard — paste
   manually.
+- **App is wedged: hotkey dead, menubar icon visible but clicking it
+  does nothing.** Before restarting, capture diagnostics so the cause
+  is findable afterwards:
+
+  ```sh
+  # 1. Dump all Python thread stacks into vlow.err
+  kill -USR1 "$(pgrep -f -- '-m vlow')"
+
+  # 2. Look at the trail: stack dump, heartbeat lines (every ~5 min:
+  #    app state, status-item health, whether modifier-key events are
+  #    still arriving), power events, state transitions
+  tail -150 ~/Library/Logs/vlow/vlow.err
+
+  # 3. Restart the service
+  launchctl kickstart -k gui/$UID/com.vlow
+  ```
+
+  A watchdog thread also self-heals one variant of this: if the main
+  runloop stops servicing pings for ~3 min while the app is idle, it
+  dumps stacks and exits so launchd relaunches it.
 
 ## Layout
 
