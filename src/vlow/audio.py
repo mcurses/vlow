@@ -46,10 +46,18 @@ def default_input_name() -> str:
 
 
 class Recorder:
-    def __init__(self, device: int | None = None) -> None:
+    def __init__(
+        self,
+        device: int | None = None,
+        on_level: "callable | None" = None,
+    ) -> None:
         """device=None → follow whatever PortAudio reports as the default at
-        start() time. Any int → that explicit device index."""
+        start() time. Any int → that explicit device index.
+
+        on_level, if given, is called from the audio callback thread with the
+        RMS level (0.0–1.0) of each captured chunk."""
         self._device = device
+        self._on_level = on_level
         self._chunks: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
 
@@ -68,6 +76,11 @@ class Recorder:
 
     def _cb(self, indata, frames, time_info, status) -> None:
         self._chunks.append(indata.copy())
+        if self._on_level is not None:
+            try:
+                self._on_level(float(np.sqrt(np.mean(np.square(indata)))))
+            except Exception:
+                pass  # never let a UI hiccup break capture
 
     def stop(self) -> np.ndarray:
         if self._stream is None:

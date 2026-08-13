@@ -23,10 +23,12 @@ class StreamingSession:
         self,
         on_partial: Optional[Callable[[str], None]] = None,
         on_final: Optional[Callable[[str], None]] = None,
+        on_level: Optional[Callable[[float], None]] = None,
         device: Optional[int] = None,
     ) -> None:
         self._on_partial = on_partial or (lambda _: None)
         self._on_final = on_final or (lambda _: None)
+        self._on_level = on_level
         self._device = device  # None → system default at start()
         self._queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
         self._final_parts: list[str] = []
@@ -92,6 +94,12 @@ class StreamingSession:
         chunk = bytes(indata)
         self._queue.put(chunk)
         self._raw_chunks.append(chunk)
+        if self._on_level is not None:
+            try:
+                scaled = indata.astype(np.float32) / 32768.0
+                self._on_level(float(np.sqrt(np.mean(np.square(scaled)))))
+            except Exception:
+                pass  # never let a UI hiccup break capture
 
     def _pump(self) -> None:
         def gen():

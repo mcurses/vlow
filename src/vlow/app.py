@@ -75,6 +75,7 @@ class VlowApp(rumps.App):
         self._pasted_in_session = False
         self._preserved_clipboard: list[dict[str, bytes]] | None = None
         self._overlay: Overlay | None = None
+        self._last_level_ts = 0.0  # throttles meter updates onto the main thread
         self._last_text = ""
         self._replay = ReplayHotkey(lambda: self._last_text)
         self._ready = False
@@ -331,6 +332,7 @@ class VlowApp(rumps.App):
         self._stream = StreamingSession(
             on_partial=self._on_stream_partial,
             on_final=self._on_stream_final,
+            on_level=self._on_level,
             device=self._input_device,
         )
         try:
@@ -348,6 +350,7 @@ class VlowApp(rumps.App):
         self.title = "⏳"
         if self._overlay is not None:
             self._overlay.update("⏳ Finalizing…")
+            self._overlay.set_meter_visible(False)
         threading.Thread(target=self._finish_stream, daemon=True).start()
 
     def _finish_stream(self) -> None:
@@ -378,6 +381,17 @@ class VlowApp(rumps.App):
         time.sleep(POST_PASTE_WAIT_SEC)
         restore_clipboard(snap)
 
+    def _on_level(self, rms: float) -> None:
+        # Called from the audio callback thread; throttle to ~30 fps so the
+        # main queue isn't flooded by small-blocksize devices.
+        if self._overlay is None:
+            return
+        now = time.monotonic()
+        if now - self._last_level_ts < 0.03:
+            return
+        self._last_level_ts = now
+        on_main_thread(lambda: self._overlay.push_level(rms))
+
     def _on_stream_partial(self, text: str) -> None:
         if self._overlay is None:
             return
@@ -405,7 +419,7 @@ class VlowApp(rumps.App):
             self._overlay.show("● Listening…")
         # Re-create the Recorder each session so device selection (and any
         # newly-attached BT mic) takes effect.
-        self._recorder = Recorder(device=self._input_device)
+        self._recorder = Recorder(device=self._input_device, on_level=self._on_level)
         try:
             self._recorder.start()
         except Exception as e:
@@ -418,6 +432,7 @@ class VlowApp(rumps.App):
         self.title = "⏳"
         if self._overlay is not None:
             self._overlay.update("⏳ Transcribing…")
+            self._overlay.set_meter_visible(False)
         audio = self._recorder.stop()
         # Persist the raw audio before transcribing so a crash in MLX / AAI
         # never loses the recording.
