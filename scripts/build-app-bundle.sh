@@ -57,16 +57,26 @@ cat > "$APP/Contents/PkgInfo" <<'EOF'
 APPL????
 EOF
 
-# Launcher: bash → exec python -m vlow. The exec replaces bash with python
-# in-place, but macOS still attributes the process to the parent bundle
-# (com.vlow) for TCC purposes because the launch originated from inside
-# the .app.
-cat > "$APP/Contents/MacOS/vlow" <<EOF
-#!/bin/bash
-cd "$PROJECT_DIR"
-exec "$PYTHON" -m vlow
-EOF
+# The bundle executable must be the real interpreter binary, not a shell
+# script that exec's it: TCC attributes permissions to the running
+# process's executable path, so a launcher shows up as "python3.12" in
+# Privacy & Security while a python binary living inside the bundle shows
+# up as "vlow". Framework builds add a twist: bin/python3.12 is a stub
+# that re-execs Resources/Python.app/Contents/MacOS/Python (so GUI code
+# gets a bundle) — copy that inner binary, which doesn't re-exec and is
+# happy inside vlow.app. The copy is turned into a venv-equivalent
+# interpreter by the pyvenv.cfg next to it (marks Contents/ as the venv
+# prefix) and the lib symlink (points site-packages at the real .venv).
+PYTHON_REAL="$(readlink -f "$PYTHON")"
+PYTHON_INNER="$(dirname "$PYTHON_REAL")/../Resources/Python.app/Contents/MacOS/Python"
+if [ -x "$PYTHON_INNER" ]; then
+  cp "$PYTHON_INNER" "$APP/Contents/MacOS/vlow"
+else
+  cp "$PYTHON_REAL" "$APP/Contents/MacOS/vlow"
+fi
 chmod +x "$APP/Contents/MacOS/vlow"
+cp "$PROJECT_DIR/.venv/pyvenv.cfg" "$APP/Contents/pyvenv.cfg"
+ln -sfn "$PROJECT_DIR/.venv/lib" "$APP/Contents/lib"
 
 # Touch the bundle so LaunchServices re-registers it.
 touch "$APP"

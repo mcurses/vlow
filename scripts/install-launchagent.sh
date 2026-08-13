@@ -45,6 +45,8 @@ cat > "$PLIST" <<EOF
     <key>ProgramArguments</key>
     <array>
         <string>$APP_EXEC</string>
+        <string>-m</string>
+        <string>vlow</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -96,6 +98,15 @@ launchctl bootstrap "gui/$UID" "$PLIST"
 launchctl enable "gui/$UID/com.vlow"
 launchctl kickstart -k "gui/$UID/com.vlow"
 
+# Install the `vlow` CLI (restart/stop/status/logs) onto PATH.
+BIN_DIR="/opt/homebrew/bin"
+if [ -d "$BIN_DIR" ] && [ -w "$BIN_DIR" ]; then
+  ln -sfn "$PROJECT_DIR/scripts/vlow" "$BIN_DIR/vlow"
+  echo "Installed CLI: $BIN_DIR/vlow (→ scripts/vlow)"
+else
+  echo "Note: $BIN_DIR not writable — symlink scripts/vlow onto PATH yourself."
+fi
+
 echo "Loaded — vlow is now managed by launchd."
 echo "Logs: $LOG_DIR"
-echo "Tail with: tail -F $LOG_DIR/vlow.err"
+echo "Tail with: vlow logs"

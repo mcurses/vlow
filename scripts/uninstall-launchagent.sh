@@ -17,4 +17,9 @@ if [ -f "$PLIST" ]; then
   echo "Removed $PLIST"
 fi
 
+if [ -L "/opt/homebrew/bin/vlow" ]; then
+  rm "/opt/homebrew/bin/vlow"
+  echo "Removed /opt/homebrew/bin/vlow CLI symlink."
+fi
+
 echo "Done. Logs in ~/Library/Logs/vlow/ are kept; delete by hand if you want."

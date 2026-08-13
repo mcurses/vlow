@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# vlow — control the vlow LaunchAgent from the terminal.
+#
+# Usage: vlow <command>
+#   restart   force-restart the running instance (picks up new code)
+#   stop      stop vlow (stays stopped until 'vlow start' or next login)
+#   start     start vlow if not running
+#   status    launchd state + last log lines
+#   logs      tail the error log (Ctrl-C to stop)
+#   install   (re)build the app bundle and (re)install the LaunchAgent
+#
+# '--restart' style also accepted. Installed by install-launchagent.sh
+# as a symlink in /opt/homebrew/bin.
+
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+PROJECT_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+SERVICE="gui/$(id -u)/com.vlow"
+PLIST="$HOME/Library/LaunchAgents/com.vlow.plist"
+LOG_DIR="$HOME/Library/Logs/vlow"
+
+cmd="${1:-help}"
+cmd="${cmd#--}"
+
+case "$cmd" in
+  restart)
+    launchctl kickstart -k "$SERVICE"
+    echo "vlow restarted."
+    ;;
+  stop)
+    launchctl bootout "$SERVICE"
+    echo "vlow stopped (until 'vlow start' or next login)."
+    ;;
+  start)
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || true
+    launchctl kickstart "$SERVICE"
+    echo "vlow started."
+    ;;
+  status)
+    if launchctl print "$SERVICE" >/dev/null 2>&1; then
+      launchctl print "$SERVICE" | grep -E '^[[:space:]]*(state|pid)' || true
+    else
+      echo "not loaded (run 'vlow start')"
+    fi
+    echo "--- last log lines ($LOG_DIR/vlow.err):"
+    tail -n 5 "$LOG_DIR/vlow.err" 2>/dev/null || echo "(no log yet)"
+    ;;
+  logs)
+    exec tail -F "$LOG_DIR/vlow.err"
+    ;;
+  install)
+    exec "$PROJECT_DIR/scripts/install-launchagent.sh"
+    ;;
+  help|*)
+    sed -n '2,12p' "$SELF" | sed 's/^# \{0,1\}//'
+    ;;
+esac

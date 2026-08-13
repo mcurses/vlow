@@ -149,12 +149,16 @@ restarts automatically if it crashes:
 scripts/install-launchagent.sh
 ```
 
-The script builds a minimal `dist/vlow.app` bundle and registers it
-with launchd. Two reasons for the bundle:
+The script builds a minimal `dist/vlow.app` bundle, registers it with
+launchd, and symlinks the `vlow` control CLI into `/opt/homebrew/bin`.
+Two reasons for the bundle:
 
 - macOS shows `vlow` in `System Settings → Privacy & Security →
   Accessibility` / `Microphone` instead of the raw `python3.12`
-  binary. (CFBundleName lives in `dist/vlow.app/Contents/Info.plist`.)
+  binary. TCC attributes permissions to the *running process's
+  executable*, so the bundle's `Contents/MacOS/vlow` is a copy of the
+  venv's python binary (made venv-equivalent via `pyvenv.cfg` + a `lib`
+  symlink) — a shell-script launcher would still show as `python3.12`.
 - LSUIElement is set, so vlow doesn't take a Dock icon when launched
   via the bundle.
 
@@ -166,11 +170,16 @@ under "Log Reports":
 - `~/Library/Logs/vlow/vlow.log` — MLX / AssemblyAI stdout.
 
 ```bash
-tail -F ~/Library/Logs/vlow/vlow.err           # live log tail
-launchctl print gui/$UID/com.vlow              # status
-launchctl kickstart -k gui/$UID/com.vlow       # force-restart
-scripts/uninstall-launchagent.sh               # remove agent (keeps logs)
+vlow restart              # force-restart (picks up new code)
+vlow stop / vlow start    # stop until next start/login · start again
+vlow status               # launchd state + last log lines
+vlow logs                 # live log tail (Ctrl-C to stop)
+vlow install              # rebuild bundle + reinstall agent
+scripts/uninstall-launchagent.sh   # remove agent (keeps logs)
 ```
+
+(The `vlow` command is a symlink to `scripts/vlow`; the raw
+`launchctl` equivalents are documented in that script.)
 
 KeepAlive is set to restart only on `Crashed`, *not* on
 `SuccessfulExit` — so clicking `Quit` from the menubar actually quits
@@ -178,17 +187,16 @@ until next login, while a crash is auto-recovered.
 
 ### First-time Accessibility under launchd
 
-When vlow runs as a LaunchAgent the underlying python binary is still
-`/Users/max/.../.venv/bin/python`, even though the bundle is named
-`vlow`. macOS may ask you to re-grant Accessibility the first time:
+After the bundle executable changes (first install, or a rebuild that
+replaces `Contents/MacOS/vlow`), macOS treats it as a new app and asks
+to re-grant permissions:
 
 1. `System Settings → Privacy & Security → Accessibility`
-2. Find `python3.12` (or `vlow` once the bundle is registered), toggle
-   off then back on.
-3. `launchctl kickstart -k gui/$UID/com.vlow` to restart with the
-   refreshed permission.
-4. `tail ~/Library/Logs/vlow/vlow.err` should now print
-   `accessibility trusted=True`.
+2. Find `vlow`, toggle it on (stale `python3.12` entries from the old
+   launcher can be removed with the ⊖ button).
+3. `vlow restart` to relaunch with the refreshed permission.
+4. `vlow status` should now show `accessibility trusted=True` in the
+   log tail. The Microphone prompt re-appears on the first recording.
 
 ## Recovery — last recording is always on disk
 
