@@ -16,7 +16,9 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+cp "$PROJECT_DIR/assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 # CFBundleName drives the human-readable name in Privacy & Security.
 # CFBundleIdentifier drives the TCC key; LSUIElement hides us from the Dock.
@@ -31,6 +33,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>com.vlow</string>
     <key>CFBundleName</key>
     <string>vlow</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleDisplayName</key>
     <string>vlow</string>
     <key>CFBundlePackageType</key>
