@@ -123,9 +123,9 @@ current state while you're recording.
 If the hotkey misfires, use the menubar dropdown — it has reliable
 fallbacks:
 
-- `⏹ Stop & Transcribe` — same as the second double-tap
-- `✕ Discard Recording` — drop the current buffer, no paste
-- `↻ Re-paste Last` — same as Ctrl+Cmd+V
+- `Stop & Transcribe` — same as the second double-tap
+- `Discard Recording` — drop the current buffer, no paste
+- `Re-paste Last` — same as Ctrl+Cmd+V
 
 ## Input device
 
@@ -135,7 +135,7 @@ launched (e.g. a Bluetooth headset) would normally be invisible — we
 re-scan on every recording start to compensate.
 
 Menubar dropdown → `Input Device` lists every detected input,
-including a system-default option and a `⟳ Refresh Devices` action for
+including a system-default option and a `Refresh Devices` action for
 when a device appears mid-session. Selecting a specific device pins it
 for all subsequent sessions until you switch back to "Use System
 Default" or quit the app (the choice is in-memory only — relaunch
