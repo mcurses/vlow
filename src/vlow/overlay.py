@@ -10,7 +10,9 @@ from AppKit import (
     NSBezierPath,
     NSColor,
     NSGlassEffectView,
+    NSGraphicsContext,
     NSPanel,
+    NSShadow,
     NSScreen,
     NSStatusWindowLevel,
     NSView,
@@ -83,7 +85,15 @@ class _MeterView(NSView):
         gap = 2.5
         bar_w = (bounds.size.width - gap * (n - 1)) / n
         radius = bar_w / 2.0
-        white = NSColor.whiteColor()
+        # Aurora gradient (violet → cyan) with a soft dark halo per bar:
+        # over clear glass no single color survives every backdrop, but
+        # color + contrast shadow reads everywhere, like subtitles.
+        NSGraphicsContext.saveGraphicsState()
+        shadow = NSShadow.alloc().init()
+        shadow.setShadowColor_(NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.75))
+        shadow.setShadowBlurRadius_(4.0)
+        shadow.setShadowOffset_((0.0, -0.5))
+        shadow.set()
         for i in range(n):
             if self._mode == "wave":
                 level = 0.30 + 0.24 * math.sin(self._phase + i * 0.48)
@@ -91,21 +101,35 @@ class _MeterView(NSView):
                 level = self._levels[i]
             # Fade the outermost bars so the row melts into the glass.
             edge = min(1.0, (i + 1) / 4.0, (n - i) / 4.0)
-            white.colorWithAlphaComponent_(0.92 * edge).setFill()
+            t = i / (n - 1)
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.48 + (0.12 - 0.48) * t,
+                0.30 + (0.78 - 0.30) * t,
+                0.98,
+                edge,
+            ).setFill()
             h = max(bar_w, level * bounds.size.height)
             x = i * (bar_w + gap)
             y = (bounds.size.height - h) / 2.0
             NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
                 NSMakeRect(x, y, bar_w, h), radius, radius
             ).fill()
+        NSGraphicsContext.restoreGraphicsState()
 
 
 class _DotView(NSView):
     """Small record dot; pulses via a repeating CA opacity animation."""
 
     def drawRect_(self, _rect):
+        NSGraphicsContext.saveGraphicsState()
+        shadow = NSShadow.alloc().init()
+        shadow.setShadowColor_(NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.6))
+        shadow.setShadowBlurRadius_(3.0)
+        shadow.setShadowOffset_((0.0, -0.5))
+        shadow.set()
         NSColor.systemRedColor().setFill()
         NSBezierPath.bezierPathWithOvalInRect_(self.bounds()).fill()
+        NSGraphicsContext.restoreGraphicsState()
 
     def startPulse(self):
         self.setWantsLayer_(True)
@@ -156,15 +180,14 @@ class Overlay:
         NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
             NSWindowDidMoveNotification, panel, None, self._on_moved
         )
-        # Always-dark glass: the white bars stay readable over any backdrop
-        # (adaptive glass turns near-white over light content).
         panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
 
-        # Liquid glass pill (macOS 26). The tint must be an opaque color —
-        # translucent tints are effectively ignored.
+        # Clear liquid glass (macOS 26): untinted so the rim lensing and
+        # backdrop transmission stay visible — the bars carry their own
+        # contrast (halo shadows) instead of a legibility tint.
         glass = NSGlassEffectView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
         glass.setCornerRadius_(h / 2.0)
-        glass.setTintColor_(NSColor.blackColor())
+        glass.setStyle_(1)  # NSGlassEffectViewStyleClear
         glass.setWantsLayer_(True)
         panel.contentView().addSubview_(glass)
 
