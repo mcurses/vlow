@@ -48,24 +48,36 @@ private struct BarsView: View {
                 let gap = 2.5
                 let barW = (size.width - gap * Double(barCount - 1)) / Double(barCount)
                 g.addFilter(.shadow(color: .black.opacity(0.7), radius: 4, y: 0.5))
-                // Crossfade between the mode's bar sources so a state switch
-                // never snaps — the frozen recording bars melt into the wave.
-                func source(_ mode: String, _ i: Int) -> Double {
+                let elapsed = t - model.modeChangedAt
+                // Wave phase is the integral of the smootherstep ramp, so the
+                // wave starts stationary and accelerates C²-smoothly to full
+                // speed instead of popping in at 7 rad/s.
+                // ∫₀ᵖ (6u⁵−15u⁴+10u³) du = p⁶ − 3p⁵ + 2.5p⁴  (= 0.5 at p = 1)
+                let rampT = 0.45
+                let rp = min(1.0, max(0.0, elapsed / rampT))
+                let rampIntegral = rp * rp * rp * rp * (2.5 + rp * (rp - 3.0))
+                let phase = 7.0 * (rampT * rampIntegral + max(0.0, elapsed - rampT))
+                // The outgoing recording snapshot keeps scrolling out to the
+                // left (index shift at the live push cadence) so bar motion
+                // never freezes while the wave sweeps in.
+                let scrollShift = Int(elapsed * 30.0)
+                func source(_ mode: String, _ i: Int, scrolled: Bool) -> Double {
                     switch mode {
-                    case "busy": return 0.30 + 0.24 * sin(t * 7.0 + Double(i) * 0.48)
-                    case "record": return model.levels[i]
+                    case "busy": return 0.30 + 0.24 * sin(phase + Double(i) * 0.48)
+                    case "record":
+                        let j = scrolled ? i + scrollShift : i
+                        return j < barCount ? model.levels[j] : 0
                     default: return 0
                     }
                 }
                 // Per-bar stagger sweeps the morph left→right; smootherstep
                 // (Perlin quintic) is C² — curvature eases in and out of the
                 // transition with no jerk at either end.
-                let elapsed = t - model.modeChangedAt
                 for i in 0..<barCount {
                     let p = min(1.0, max(0.0, (elapsed - Double(i) * 0.012) / 0.45))
                     let blend = p * p * p * (p * (p * 6 - 15) + 10)
-                    let level = source(model.previousMode, i) * (1 - blend)
-                        + source(model.mode, i) * blend
+                    let level = source(model.previousMode, i, scrolled: model.previousMode == "record") * (1 - blend)
+                        + source(model.mode, i, scrolled: false) * blend
                     let edge = min(1.0, Double(i + 1) / 4.0, Double(barCount - i) / 4.0)
                     let f = Double(i) / Double(barCount - 1)
                     let color = Color(
