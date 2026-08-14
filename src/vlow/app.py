@@ -2,6 +2,7 @@ import sys
 import threading
 import time
 from enum import Enum
+from pathlib import Path
 
 
 def _log(msg: str) -> None:
@@ -60,10 +61,24 @@ def on_main_thread(fn):
 
 VALID_MODES = ("toggle", "ptt")
 
+# Menubar status icons (SF Symbol renders, see scripts/gen-menubar-icons.py).
+# key → (filename, is_template). Template icons adapt to menubar appearance;
+# the recording icon stays system-red.
+_ICON_DIR = Path(__file__).resolve().parents[2] / "assets" / "menubar"
+_STATUS_ICONS = {
+    "loading": ("mic-dim.png", True),
+    "idle": ("mic.png", True),
+    "recording": ("mic-red.png", False),
+    "busy": ("waveform.png", True),
+    "error": ("warn.png", True),
+}
+
 
 class VlowApp(rumps.App):
     def __init__(self) -> None:
-        super().__init__("vlow", title="🎙", quit_button="Quit")
+        super().__init__("vlow", quit_button="Quit")
+        self._status_key = ""
+        self._set_status_icon("loading")
         self._config = load_config()
         self._mode = self._config.get("mode", "toggle")
         if self._mode not in VALID_MODES:
@@ -99,11 +114,11 @@ class VlowApp(rumps.App):
         self._mode_item.set_callback(None)
         self._backend_item = rumps.MenuItem(_backend_label())
         self._backend_item.set_callback(None)
-        self._stop_item = rumps.MenuItem("⏹ Stop & Transcribe", callback=self._menu_stop)
-        self._discard_item = rumps.MenuItem("✕ Discard Recording", callback=self._menu_discard)
-        self._replay_item = rumps.MenuItem("↻ Re-paste Last", callback=self._menu_replay)
-        self._reveal_item = rumps.MenuItem("📁 Reveal Last Recording", callback=self._menu_reveal)
-        self._device_menu = rumps.MenuItem("🎙 Input Device")
+        self._stop_item = rumps.MenuItem("Stop & Transcribe", callback=self._menu_stop)
+        self._discard_item = rumps.MenuItem("Discard Recording", callback=self._menu_discard)
+        self._replay_item = rumps.MenuItem("Re-paste Last", callback=self._menu_replay)
+        self._reveal_item = rumps.MenuItem("Reveal Last Recording", callback=self._menu_reveal)
+        self._device_menu = rumps.MenuItem("Input Device")
         self._populate_device_menu()
         self.menu = [
             self._mode_item,
@@ -127,27 +142,23 @@ class VlowApp(rumps.App):
             self._device_menu.clear()
         except Exception:
             pass
-        # Item 0: follow system default.
-        default_label = (
-            "✓ Use System Default" if self._input_device is None else "  Use System Default"
+        # Item 0: follow system default. Selection shows as a native checkmark.
+        default_item = rumps.MenuItem(
+            "Use System Default", callback=self._select_default_device
         )
-        self._device_menu.add(
-            rumps.MenuItem(default_label, callback=self._select_default_device)
-        )
+        default_item.state = 1 if self._input_device is None else 0
+        self._device_menu.add(default_item)
         # One item per discovered input device.
         for d in list_input_devices():
-            tags = []
-            if d["is_default"]:
-                tags.append("system default")
-            tag_str = f"  ({', '.join(tags)})" if tags else ""
-            checked = "✓ " if self._input_device == d["index"] else "  "
-            title = f"{checked}{d['name']}{tag_str}"
-            self._device_menu.add(
-                rumps.MenuItem(title, callback=self._make_device_selector(d["index"]))
+            tag_str = "  (system default)" if d["is_default"] else ""
+            item = rumps.MenuItem(
+                f"{d['name']}{tag_str}", callback=self._make_device_selector(d["index"])
             )
+            item.state = 1 if self._input_device == d["index"] else 0
+            self._device_menu.add(item)
         self._device_menu.add(None)  # separator
         self._device_menu.add(
-            rumps.MenuItem("⟳ Refresh Devices", callback=self._menu_refresh_devices)
+            rumps.MenuItem("Refresh Devices", callback=self._menu_refresh_devices)
         )
 
     def _make_device_selector(self, idx: int):
@@ -232,7 +243,7 @@ class VlowApp(rumps.App):
             _log("replay hotkey started")
         except Exception as e:
             _log(f"replay start failed: {e}")
-        self.title = "🎙…"
+        self._set_status_icon("loading")
         threading.Thread(target=self._warmup, daemon=True).start()
         _log("warmup thread spawned")
         self._watchdog = Watchdog(
@@ -246,7 +257,7 @@ class VlowApp(rumps.App):
 
     def _probe_main(self) -> str:
         """Runs on the main thread via the watchdog ping; summarizes UI health."""
-        bits = [f"title={self.title!r}", EVENT_STATS.summary()]
+        bits = [f"icon={self._status_key}", EVENT_STATS.summary()]
         try:
             item = self._nsapp.nsstatusitem
             button = item.button()
@@ -274,7 +285,7 @@ class VlowApp(rumps.App):
                 warmup()
             _log(f"warmup done in {time.time()-t0:.1f}s — hotkey is live")
             self._ready = True
-            on_main_thread(lambda: self._set_title("🎙"))
+            on_main_thread(lambda: self._set_status_icon("idle"))
             hotkey_label = self._config["hotkey"].replace("_", " ").title()
             if self._mode == "ptt":
                 rumps.notification(
@@ -296,11 +307,18 @@ class VlowApp(rumps.App):
                 )
         except Exception as e:
             print(f"warmup failed: {e}", flush=True)
-            on_main_thread(lambda: self._set_title("⚠️"))
+            on_main_thread(lambda: self._set_status_icon("error"))
             rumps.notification("vlow warmup failed", self._mode, str(e))
 
-    def _set_title(self, t: str) -> None:
-        self.title = t
+    def _set_status_icon(self, key: str) -> None:
+        if key == self._status_key:
+            return
+        self._status_key = key
+        filename, is_template = _STATUS_ICONS[key]
+        # Order matters: rumps' template setter re-applies the current icon,
+        # and its icon setter reads the current template flag.
+        self.template = is_template
+        self.icon = str(_ICON_DIR / filename)
 
     def _on_double_tap(self) -> None:
         if not self._ready:
@@ -326,7 +344,7 @@ class VlowApp(rumps.App):
         # Preserve the user's clipboard for the whole streaming session so we
         # don't flicker it back-and-forth between finalized turns.
         self._preserved_clipboard = snapshot_clipboard()
-        self.title = "🔴"
+        self._set_status_icon("recording")
         if self._overlay is not None:
             self._overlay.show("● Streaming…")
         self._stream = StreamingSession(
@@ -347,9 +365,9 @@ class VlowApp(rumps.App):
         if self._state != State.STREAMING or self._stream is None:
             return
         self._to_state(State.FINALIZING, "hold end")
-        self.title = "⏳"
+        self._set_status_icon("busy")
         if self._overlay is not None:
-            self._overlay.update("⏳ Finalizing…")
+            self._overlay.update("Finalizing…")
             self._overlay.set_meter_visible(False)
         threading.Thread(target=self._finish_stream, daemon=True).start()
 
@@ -367,7 +385,7 @@ class VlowApp(rumps.App):
     def _after_stream(self) -> None:
         if self._overlay is not None:
             self._overlay.hide()
-        self.title = "🎙"
+        self._set_status_icon("idle")
         self._to_state(State.IDLE, "stream finished")
         self._restore_preserved_clipboard()
 
@@ -414,7 +432,7 @@ class VlowApp(rumps.App):
 
     def _start_recording(self) -> None:
         self._to_state(State.RECORDING, "double-tap")
-        self.title = "🔴"
+        self._set_status_icon("recording")
         if self._overlay is not None:
             self._overlay.show("● Listening…")
         # Re-create the Recorder each session so device selection (and any
@@ -429,9 +447,9 @@ class VlowApp(rumps.App):
 
     def _stop_and_transcribe(self) -> None:
         self._to_state(State.TRANSCRIBING, "double-tap stop")
-        self.title = "⏳"
+        self._set_status_icon("busy")
         if self._overlay is not None:
-            self._overlay.update("⏳ Transcribing…")
+            self._overlay.update("Transcribing…")
             self._overlay.set_meter_visible(False)
         audio = self._recorder.stop()
         # Persist the raw audio before transcribing so a crash in MLX / AAI
@@ -453,7 +471,7 @@ class VlowApp(rumps.App):
     def _finish(self, text: str) -> None:
         if self._overlay is not None:
             self._overlay.hide()
-        self.title = "🎙"
+        self._set_status_icon("idle")
         self._to_state(State.IDLE, f"transcription done, {len(text)} chars")
         if text:
             self._last_text = text
@@ -462,6 +480,6 @@ class VlowApp(rumps.App):
     def _reset(self) -> None:
         if self._overlay is not None:
             self._overlay.hide()
-        self.title = "🎙"
+        self._set_status_icon("idle")
         self._to_state(State.IDLE, "reset")
         self._restore_preserved_clipboard()

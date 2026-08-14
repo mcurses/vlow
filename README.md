@@ -115,8 +115,9 @@ you don't want any double-tap dictation at all.
 | Hold Right Option              | Live AssemblyAI streaming with progressive paste. Release to stop. |
 | Ctrl + Cmd + V                 | Re-paste last transcript.                    |
 
-The menubar icon reflects state: `🎙` idle, `🔴` recording,
-`⏳` transcribing, `⚠️` error. A small floating overlay also shows the
+The menubar icon reflects state: mic idle, dimmed mic loading,
+red mic recording, waveform transcribing, warning triangle error
+(SF Symbol renders — regenerate with `scripts/gen-menubar-icons.py`). A small floating overlay also shows the
 current state while you're recording.
 
 If the hotkey misfires, use the menubar dropdown — it has reliable
@@ -133,7 +134,7 @@ caches its device list at import, so devices that connect *after* vlow
 launched (e.g. a Bluetooth headset) would normally be invisible — we
 re-scan on every recording start to compensate.
 
-Menubar dropdown → `🎙 Input Device` lists every detected input,
+Menubar dropdown → `Input Device` lists every detected input,
 including a system-default option and a `⟳ Refresh Devices` action for
 when a device appears mid-session. Selecting a specific device pins it
 for all subsequent sessions until you switch back to "Use System
@@ -205,7 +206,7 @@ Every session — batch or streaming — writes its raw audio to
 network round-trip. If MLX crashes, the WebSocket hangs, or you hit
 "Discard" by mistake, the audio is still there.
 
-- **Reveal it** from the menubar dropdown → `📁 Reveal Last Recording`,
+- **Reveal it** from the menubar dropdown → `Reveal Last Recording`,
   or open the file directly:
   ```bash
   open "$HOME/Library/Application Support/vlow/last_recording.wav"
