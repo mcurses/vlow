@@ -309,7 +309,9 @@ src/vlow/
 ├── transcribe_aai.py  cloud universal-3-pro/2 via AssemblyAI SDK
 ├── stream_aai.py      live AssemblyAI Universal Streaming session (ptt mode)
 ├── hotkey.py          double-tap + hold detectors over NSEvent flagsChanged
-├── overlay.py         borderless non-activating NSPanel
+├── overlay.py         borderless non-activating NSPanel hosting the SwiftUI
+│                      glass pill (native/VlowGlass.swift → dist/libVlowGlass.dylib,
+│                      compiled by scripts/build-glass.sh)
 ├── paste.py           pbcopy + synthesized Cmd+V via CGEvent
 └── replay.py          pynput global Ctrl+Cmd+V → re-paste last text
 ```

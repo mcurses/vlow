@@ -15,6 +15,9 @@ if [ ! -x "$PYTHON" ]; then
   exit 1
 fi
 
+# The SwiftUI overlay module lives alongside the bundle in dist/.
+"$PROJECT_DIR/scripts/build-glass.sh"
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
