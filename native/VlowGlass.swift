@@ -16,9 +16,13 @@ private let pillSize = CGSize(width: 200, height: 52)
 public final class VlowGlassModel: NSObject, ObservableObject {
     // "hidden" | "record" | "busy" — main thread only.
     @Published var mode: String = "hidden"
+    var previousMode: String = "hidden"
+    var modeChangedAt: TimeInterval = 0
     var levels: [Double] = Array(repeating: 0, count: barCount)
 
     @objc public func setMode(_ mode: String) {
+        previousMode = self.mode
+        modeChangedAt = Date().timeIntervalSinceReferenceDate
         withAnimation(.spring(response: 0.42, dampingFraction: 0.74)) {
             self.mode = mode
         }
@@ -44,13 +48,20 @@ private struct BarsView: View {
                 let gap = 2.5
                 let barW = (size.width - gap * Double(barCount - 1)) / Double(barCount)
                 g.addFilter(.shadow(color: .black.opacity(0.7), radius: 4, y: 0.5))
-                for i in 0..<barCount {
-                    let level: Double
-                    if model.mode == "busy" {
-                        level = 0.30 + 0.24 * sin(t * 7.0 + Double(i) * 0.48)
-                    } else {
-                        level = model.levels[i]
+                // Crossfade between the mode's bar sources so a state switch
+                // never snaps — the frozen recording bars melt into the wave.
+                func source(_ mode: String, _ i: Int) -> Double {
+                    switch mode {
+                    case "busy": return 0.30 + 0.24 * sin(t * 7.0 + Double(i) * 0.48)
+                    case "record": return model.levels[i]
+                    default: return 0
                     }
+                }
+                let p = min(1.0, max(0.0, (t - model.modeChangedAt) / 0.55))
+                let blend = p * p * (3 - 2 * p)  // smoothstep
+                for i in 0..<barCount {
+                    let level = source(model.previousMode, i) * (1 - blend)
+                        + source(model.mode, i) * blend
                     let edge = min(1.0, Double(i + 1) / 4.0, Double(barCount - i) / 4.0)
                     let f = Double(i) / Double(barCount - 1)
                     let color = Color(
