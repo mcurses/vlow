@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>vlow overlay — style exploration</title>
+<style>
+  body { background:#111; color:#eee; font-family:-apple-system, sans-serif; margin:2rem; }
+  h1 { font-weight:600; font-size:1.4rem; }
+  p.sub { color:#999; margin-top:-.5rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(420px, 1fr)); gap:1.5rem; }
+  figure { margin:0; background:#1a1a1a; border-radius:12px; overflow:hidden; }
+  img { width:100%; display:block; }
+  figcaption { padding:.7rem 1rem 1rem; }
+  figcaption b { display:block; margin-bottom:.2rem; }
+  figcaption span { color:#aaa; font-size:.85rem; line-height:1.35; display:block; }
+</style>
+</head>
+<body>
+<h1>vlow overlay — style exploration (fal.ai flux/dev, 2026-08-14)</h1>
+<p class="sub">Concept art, not pixel specs — each is implementable as a variation of the current NSGlassEffectView pill.</p>
+<div class="grid">
+  <figure><img src="01-minimal-mono.jpg" alt="">
+    <figcaption><b>01 · Minimal mono</b><span>Slim matte capsule, single thin waveform line, tiny red dot, no text. Most restrained; least visual noise while dictating.</span></figcaption></figure>
+  <figure><img src="02-dynamic-island.jpg" alt="">
+    <figcaption><b>02 · Dynamic Island</b><span>Matte-black squircle, multicolor gradient bars, label + red dot. Familiar iOS energy; colorful but contained.</span></figcaption></figure>
+  <figure><img src="03-aurora-glass.jpg" alt="">
+    <figcaption><b>03 · Aurora glass</b><span>Iridescent glass bubble with pink/cyan rim glow. Closest evolution of the current liquid-glass pill — add a soft gradient rim.</span></figcaption></figure>
+  <figure><img src="04-neon-orb.jpg" alt="">
+    <figcaption><b>04 · Neon orb</b><span>Circular orb with glowing neon ring. Boldest departure; more art object than status widget.</span></figcaption></figure>
+  <figure><img src="05-paper-light.jpg" alt="">
+    <figcaption><b>05 · Paper light</b><span>Light translucent card, charcoal waveform, red accents. A light-mode alternative; calm and editorial.</span></figcaption></figure>
+  <figure><img src="06-spectrum-bars.jpg" alt="">
+    <figcaption><b>06 · Spectrum bars</b><span>Dark glass, per-bar spectrum hues with bloom, small session timer. Current shape, maximal waveform drama.</span></figcaption></figure>
+</div>
+</body>
+</html>
