@@ -1,3 +1,7 @@
+import math
+import threading
+import time
+
 import objc
 from AppKit import (
     NSAppearance,
@@ -5,15 +9,10 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSBezierPath,
     NSColor,
-    NSFont,
-    NSFontWeightMedium,
     NSGlassEffectView,
-    NSMutableAttributedString,
     NSPanel,
     NSScreen,
     NSStatusWindowLevel,
-    NSTextField,
-    NSTextAlignmentCenter,
     NSView,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorFullScreenAuxiliary,
@@ -22,47 +21,78 @@ from AppKit import (
     NSWindowStyleMaskNonactivatingPanel,
 )
 from Foundation import (
-    NSMakeRange,
+    NSAnimationContext,
     NSMakeRect,
     NSNotificationCenter,
+    NSOperationQueue,
     NSPointInRect,
     NSUserDefaults,
 )
+from Quartz import CABasicAnimation, CASpringAnimation
 
-_METER_BARS = 20
+_METER_BARS = 28
 # RMS of normal speech at a typical mic distance sits around 0.03–0.15;
 # divide by this before the perceptual sqrt so voice spans most of the bar.
 _METER_FULL_SCALE_RMS = 0.25
+_WAVE_FPS = 30.0
 
 
-class _LevelMeterView(NSView):
-    """Row of rounded vertical bars scrolling right-to-left with recent
-    mic amplitude — the ChatGPT-recording-mode look."""
+def _on_main(fn):
+    NSOperationQueue.mainQueue().addOperationWithBlock_(fn)
+
+
+class _MeterView(NSView):
+    """The pill's only content: a row of rounded bars.
+
+    mode "levels": bars scroll right-to-left with live mic amplitude.
+    mode "wave":   bars ripple with a traveling sine wave (transcribing).
+    """
 
     def initWithFrame_(self, frame):
-        self = objc.super(_LevelMeterView, self).initWithFrame_(frame)
+        self = objc.super(_MeterView, self).initWithFrame_(frame)
         if self is None:
             return None
         self._levels = [0.0] * _METER_BARS
+        self._mode = "levels"
+        self._phase = 0.0
         return self
 
-    def reset(self):
-        self._levels = [0.0] * _METER_BARS
+    def setMode_(self, mode):
+        self._mode = mode
+        if mode == "levels":
+            self._levels = [0.0] * _METER_BARS
         self.setNeedsDisplay_(True)
 
     def pushLevel_(self, level):
-        self._levels = self._levels[1:] + [min(1.0, max(0.0, float(level)))]
-        self.setNeedsDisplay_(True)
+        # Blend with the previous newest bar so the scroll reads as one
+        # continuous waveform instead of disconnected samples.
+        level = min(1.0, max(0.0, float(level)))
+        smoothed = max(level, self._levels[-1] * 0.72)
+        self._levels = self._levels[1:] + [smoothed]
+        if self._mode == "levels":
+            self.setNeedsDisplay_(True)
+
+    def advanceWave_(self, dt):
+        self._phase += dt * 2.6
+        if self._mode == "wave":
+            self.setNeedsDisplay_(True)
 
     def drawRect_(self, _rect):
         bounds = self.bounds()
-        n = len(self._levels)
+        n = _METER_BARS
         gap = 2.5
         bar_w = (bounds.size.width - gap * (n - 1)) / n
         radius = bar_w / 2.0
-        NSColor.whiteColor().colorWithAlphaComponent_(0.92).setFill()
-        for i, level in enumerate(self._levels):
-            h = max(bar_w, level * bounds.size.height)  # floor: a dot, not nothing
+        white = NSColor.whiteColor()
+        for i in range(n):
+            if self._mode == "wave":
+                level = 0.30 + 0.24 * math.sin(self._phase + i * 0.48)
+            else:
+                level = self._levels[i]
+            # Fade the outermost bars so the row melts into the glass.
+            edge = min(1.0, (i + 1) / 4.0, (n - i) / 4.0)
+            white.colorWithAlphaComponent_(0.92 * edge).setFill()
+            h = max(bar_w, level * bounds.size.height)
             x = i * (bar_w + gap)
             y = (bounds.size.height - h) / 2.0
             NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
@@ -70,13 +100,33 @@ class _LevelMeterView(NSView):
             ).fill()
 
 
+class _DotView(NSView):
+    """Small record dot; pulses via a repeating CA opacity animation."""
+
+    def drawRect_(self, _rect):
+        NSColor.systemRedColor().setFill()
+        NSBezierPath.bezierPathWithOvalInRect_(self.bounds()).fill()
+
+    def startPulse(self):
+        self.setWantsLayer_(True)
+        pulse = CABasicAnimation.animationWithKeyPath_("opacity")
+        pulse.setFromValue_(1.0)
+        pulse.setToValue_(0.25)
+        pulse.setDuration_(0.7)
+        pulse.setAutoreverses_(True)
+        pulse.setRepeatCount_(float("inf"))
+        self.layer().addAnimation_forKey_(pulse, "pulse")
+
+
 class Overlay:
-    """Floating, non-activating liquid-glass pill showing recording status."""
+    """Floating, non-activating liquid-glass pill: pure animation, no text.
 
-    _W, _H = 260, 64
-    _LABEL_TOP = NSMakeRect(16, 34, _W - 32, 20)      # meter visible below
-    _LABEL_CENTERED = NSMakeRect(16, (_H - 22) / 2, _W - 32, 22)
+    Recording → live amplitude bars + pulsing red dot.
+    Busy (transcribing/finalizing) → traveling wave, dot hidden.
+    Open/close/state-switch spring-animate like iOS glass controls.
+    """
 
+    _W, _H = 200, 52
     _ORIGIN_KEY = "overlayOrigin"  # NSUserDefaults (com.vlow): [x, y]
 
     def __init__(self) -> None:
@@ -106,40 +156,33 @@ class Overlay:
         NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
             NSWindowDidMoveNotification, panel, None, self._on_moved
         )
-        # Always-dark glass: white label/meter stay readable over any
-        # backdrop (adaptive glass turns near-white over light content).
+        # Always-dark glass: the white bars stay readable over any backdrop
+        # (adaptive glass turns near-white over light content).
         panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
 
         # Liquid glass pill (macOS 26). The tint must be an opaque color —
-        # translucent tints are effectively ignored and the glass then adapts
-        # to the backdrop, washing out the white label over light content.
+        # translucent tints are effectively ignored.
         glass = NSGlassEffectView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
         glass.setCornerRadius_(h / 2.0)
         glass.setTintColor_(NSColor.blackColor())
+        glass.setWantsLayer_(True)
         panel.contentView().addSubview_(glass)
 
         inner = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
-
-        label = NSTextField.labelWithString_("")
-        label.setTextColor_(NSColor.whiteColor())
-        label.setBackgroundColor_(NSColor.clearColor())
-        label.setDrawsBackground_(False)
-        label.setBezeled_(False)
-        label.setAlignment_(NSTextAlignmentCenter)
-        label.setFont_(NSFont.systemFontOfSize_weight_(13.5, NSFontWeightMedium))
-        label.setFrame_(self._LABEL_TOP)
-        inner.addSubview_(label)
-
-        meter = _LevelMeterView.alloc().initWithFrame_(
-            NSMakeRect((w - 110) / 2, 9, 110, 20)
-        )
+        meter = _MeterView.alloc().initWithFrame_(NSMakeRect(42, 12, w - 62, h - 24))
         inner.addSubview_(meter)
-
+        dot = _DotView.alloc().initWithFrame_(NSMakeRect(20, h / 2 - 4, 8, 8))
+        inner.addSubview_(dot)
         glass.setContentView_(inner)
 
         self._panel = panel
-        self._label = label
+        self._glass = glass
         self._meter = meter
+        self._dot = dot
+        self._mode: str | None = None  # None | "record" | "busy"
+        self._wave_thread: threading.Thread | None = None
+
+    # ── position persistence ────────────────────────────────────────────
 
     def _restore_origin(self):
         """Return the saved (x, y) if it still lands on a screen, else None."""
@@ -159,34 +202,89 @@ class Overlay:
             [float(origin.x), float(origin.y)], self._ORIGIN_KEY
         )
 
-    def _set_label(self, text: str) -> None:
-        """Render the status text; a leading record-dot ● turns red."""
-        self._label.setStringValue_(text)
-        if text.startswith("●"):
-            attr = NSMutableAttributedString.alloc().initWithAttributedString_(
-                self._label.attributedStringValue()
-            )
-            attr.addAttribute_value_range_(
-                "NSColor", NSColor.systemRedColor(), NSMakeRange(0, 1)
-            )
-            self._label.setAttributedStringValue_(attr)
+    # ── animations ──────────────────────────────────────────────────────
 
-    def show(self, text: str) -> None:
-        self._set_label(text)
-        self.set_meter_visible(True)
-        self._meter.reset()
-        self._panel.orderFront_(None)
+    def _spring(self, from_scale: float, damping: float = 13.0) -> None:
+        layer = self._glass.layer()
+        layer.setAnchorPoint_((0.5, 0.5))
+        layer.setPosition_((self._W / 2, self._H / 2))
+        spring = CASpringAnimation.animationWithKeyPath_("transform.scale")
+        spring.setFromValue_(from_scale)
+        spring.setToValue_(1.0)
+        spring.setDamping_(damping)
+        spring.setStiffness_(240.0)
+        spring.setMass_(1.0)
+        spring.setInitialVelocity_(0.0)
+        spring.setDuration_(spring.settlingDuration())
+        layer.addAnimation_forKey_(spring, "pop")
 
-    def update(self, text: str) -> None:
-        self._set_label(text)
+    def _start_wave(self) -> None:
+        if self._wave_thread is not None:
+            return
+
+        def run():
+            dt = 1.0 / _WAVE_FPS
+            while self._mode == "busy":
+                _on_main(lambda: self._meter.advanceWave_(dt))
+                time.sleep(dt)
+            self._wave_thread = None
+
+        self._wave_thread = threading.Thread(target=run, daemon=True)
+        self._wave_thread.start()
+
+    # ── public API (main thread) ────────────────────────────────────────
+
+    def show_recording(self) -> None:
+        """Pop the pill in with live amplitude bars + pulsing record dot."""
+        self._mode = "record"
+        self._meter.setMode_("levels")
+        self._dot.setHidden_(False)
+        self._dot.startPulse()
+        if not self._panel.isVisible():
+            self._panel.setAlphaValue_(0.0)
+            self._panel.orderFront_(None)
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.currentContext().setDuration_(0.22)
+            self._panel.animator().setAlphaValue_(1.0)
+            NSAnimationContext.endGrouping()
+            self._spring(0.45)
+
+    def show_busy(self) -> None:
+        """Switch to the transcribing wave with a springy squish."""
+        was_visible = self._panel.isVisible()
+        self._mode = "busy"
+        self._meter.setMode_("wave")
+        self._dot.setHidden_(True)
+        if not was_visible:
+            self._panel.setAlphaValue_(1.0)
+            self._panel.orderFront_(None)
+            self._spring(0.45)
+        else:
+            self._spring(0.90, damping=9.0)
+        self._start_wave()
 
     def push_level(self, rms: float) -> None:
         """Feed one raw RMS sample (0.0–1.0); perceptually scaled here."""
         self._meter.pushLevel_((rms / _METER_FULL_SCALE_RMS) ** 0.5)
 
-    def set_meter_visible(self, visible: bool) -> None:
-        self._meter.setHidden_(not visible)
-        self._label.setFrame_(self._LABEL_TOP if visible else self._LABEL_CENTERED)
-
     def hide(self) -> None:
-        self._panel.orderOut_(None)
+        if not self._panel.isVisible():
+            self._mode = None
+            return
+        self._mode = None  # stops the wave thread
+        shrink = CABasicAnimation.animationWithKeyPath_("transform.scale")
+        shrink.setFromValue_(1.0)
+        shrink.setToValue_(0.75)
+        shrink.setDuration_(0.16)
+        self._glass.layer().addAnimation_forKey_(shrink, "shrink")
+
+        def done():
+            self._panel.orderOut_(None)
+            self._panel.setAlphaValue_(1.0)
+            self._glass.layer().removeAllAnimations()
+
+        def fade(ctx):
+            ctx.setDuration_(0.16)
+            self._panel.animator().setAlphaValue_(0.0)
+
+        NSAnimationContext.runAnimationGroup_completionHandler_(fade, done)

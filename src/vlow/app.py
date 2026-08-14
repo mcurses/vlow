@@ -346,9 +346,8 @@ class VlowApp(rumps.App):
         self._preserved_clipboard = snapshot_clipboard()
         self._set_status_icon("recording")
         if self._overlay is not None:
-            self._overlay.show("● Streaming…")
+            self._overlay.show_recording()
         self._stream = StreamingSession(
-            on_partial=self._on_stream_partial,
             on_final=self._on_stream_final,
             on_level=self._on_level,
             device=self._input_device,
@@ -367,8 +366,7 @@ class VlowApp(rumps.App):
         self._to_state(State.FINALIZING, "hold end")
         self._set_status_icon("busy")
         if self._overlay is not None:
-            self._overlay.update("Finalizing…")
-            self._overlay.set_meter_visible(False)
+            self._overlay.show_busy()
         threading.Thread(target=self._finish_stream, daemon=True).start()
 
     def _finish_stream(self) -> None:
@@ -410,12 +408,6 @@ class VlowApp(rumps.App):
         self._last_level_ts = now
         on_main_thread(lambda: self._overlay.push_level(rms))
 
-    def _on_stream_partial(self, text: str) -> None:
-        if self._overlay is None:
-            return
-        display = text if len(text) <= 60 else "…" + text[-60:]
-        on_main_thread(lambda: self._overlay.update(f"● {display}"))
-
     def _on_stream_final(self, text: str) -> None:
         # Paste each final turn progressively so dictation appears live in the
         # focused app. Add a leading space between turns of the same session.
@@ -434,7 +426,7 @@ class VlowApp(rumps.App):
         self._to_state(State.RECORDING, "double-tap")
         self._set_status_icon("recording")
         if self._overlay is not None:
-            self._overlay.show("● Listening…")
+            self._overlay.show_recording()
         # Re-create the Recorder each session so device selection (and any
         # newly-attached BT mic) takes effect.
         self._recorder = Recorder(device=self._input_device, on_level=self._on_level)
@@ -449,8 +441,7 @@ class VlowApp(rumps.App):
         self._to_state(State.TRANSCRIBING, "double-tap stop")
         self._set_status_icon("busy")
         if self._overlay is not None:
-            self._overlay.update("Transcribing…")
-            self._overlay.set_meter_visible(False)
+            self._overlay.show_busy()
         audio = self._recorder.stop()
         # Persist the raw audio before transcribing so a crash in MLX / AAI
         # never loses the recording.
