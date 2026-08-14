@@ -15,10 +15,19 @@ from AppKit import (
     NSTextField,
     NSTextAlignmentCenter,
     NSView,
+    NSWindowCollectionBehaviorCanJoinAllSpaces,
+    NSWindowCollectionBehaviorFullScreenAuxiliary,
+    NSWindowDidMoveNotification,
     NSWindowStyleMaskBorderless,
     NSWindowStyleMaskNonactivatingPanel,
 )
-from Foundation import NSMakeRange, NSMakeRect
+from Foundation import (
+    NSMakeRange,
+    NSMakeRect,
+    NSNotificationCenter,
+    NSPointInRect,
+    NSUserDefaults,
+)
 
 _METER_BARS = 20
 # RMS of normal speech at a typical mic distance sits around 0.03–0.15;
@@ -68,11 +77,15 @@ class Overlay:
     _LABEL_TOP = NSMakeRect(16, 34, _W - 32, 20)      # meter visible below
     _LABEL_CENTERED = NSMakeRect(16, (_H - 22) / 2, _W - 32, 22)
 
+    _ORIGIN_KEY = "overlayOrigin"  # NSUserDefaults (com.vlow): [x, y]
+
     def __init__(self) -> None:
         screen = NSScreen.mainScreen().visibleFrame()
         w, h = self._W, self._H
-        x = screen.origin.x + (screen.size.width - w) / 2
-        y = screen.origin.y + screen.size.height * 0.18
+        x, y = self._restore_origin() or (
+            screen.origin.x + (screen.size.width - w) / 2,
+            screen.origin.y + screen.size.height * 0.18,
+        )
         style = NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(x, y, w, h), style, NSBackingStoreBuffered, False
@@ -81,8 +94,18 @@ class Overlay:
         panel.setOpaque_(False)
         panel.setBackgroundColor_(NSColor.clearColor())
         panel.setHasShadow_(True)
-        panel.setIgnoresMouseEvents_(True)
         panel.setHidesOnDeactivate_(False)
+        # Follow the user across Spaces (and over fullscreen apps), and let
+        # them drag the pill anywhere — the position sticks via NSUserDefaults.
+        panel.setCollectionBehavior_(
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorFullScreenAuxiliary
+        )
+        panel.setIgnoresMouseEvents_(False)
+        panel.setMovableByWindowBackground_(True)
+        NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
+            NSWindowDidMoveNotification, panel, None, self._on_moved
+        )
         # Always-dark glass: white label/meter stay readable over any
         # backdrop (adaptive glass turns near-white over light content).
         panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
@@ -117,6 +140,24 @@ class Overlay:
         self._panel = panel
         self._label = label
         self._meter = meter
+
+    def _restore_origin(self):
+        """Return the saved (x, y) if it still lands on a screen, else None."""
+        stored = NSUserDefaults.standardUserDefaults().arrayForKey_(self._ORIGIN_KEY)
+        if not stored or len(stored) != 2:
+            return None
+        x, y = float(stored[0]), float(stored[1])
+        center = (x + self._W / 2, y + self._H / 2)
+        for screen in NSScreen.screens():
+            if NSPointInRect(center, screen.visibleFrame()):
+                return x, y
+        return None
+
+    def _on_moved(self, _note) -> None:
+        origin = self._panel.frame().origin
+        NSUserDefaults.standardUserDefaults().setObject_forKey_(
+            [float(origin.x), float(origin.y)], self._ORIGIN_KEY
+        )
 
     def _set_label(self, text: str) -> None:
         """Render the status text; a leading record-dot ● turns red."""
