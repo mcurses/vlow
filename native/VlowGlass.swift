@@ -57,9 +57,13 @@ private struct BarsView: View {
                     default: return 0
                     }
                 }
-                let p = min(1.0, max(0.0, (t - model.modeChangedAt) / 0.55))
-                let blend = p * p * (3 - 2 * p)  // smoothstep
+                // Per-bar stagger sweeps the morph left→right; smootherstep
+                // (Perlin quintic) is C² — curvature eases in and out of the
+                // transition with no jerk at either end.
+                let elapsed = t - model.modeChangedAt
                 for i in 0..<barCount {
+                    let p = min(1.0, max(0.0, (elapsed - Double(i) * 0.012) / 0.45))
+                    let blend = p * p * p * (p * (p * 6 - 15) + 10)
                     let level = source(model.previousMode, i) * (1 - blend)
                         + source(model.mode, i) * blend
                     let edge = min(1.0, Double(i + 1) / 4.0, Double(barCount - i) / 4.0)
