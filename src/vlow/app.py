@@ -442,18 +442,20 @@ class VlowApp(rumps.App):
         self._set_status_icon("busy")
         if self._overlay is not None:
             self._overlay.show_busy()
-        audio = self._recorder.stop()
-        # Persist the raw audio before transcribing so a crash in MLX / AAI
-        # never loses the recording.
-        try:
-            save_float32(audio)
-        except Exception as e:
-            print(f"save raw recording failed: {e}", flush=True)
-        threading.Thread(target=self._do_transcribe, args=(audio,), daemon=True).start()
+        # recorder.stop() blocks ~110ms in PortAudio stream teardown — off
+        # the main thread, or the overlay's transition drops frames.
+        threading.Thread(target=self._do_transcribe, daemon=True).start()
 
-    def _do_transcribe(self, audio) -> None:
+    def _do_transcribe(self) -> None:
         text = ""
         try:
+            audio = self._recorder.stop()
+            # Persist the raw audio before transcribing so a crash in
+            # MLX / AAI never loses the recording.
+            try:
+                save_float32(audio)
+            except Exception as e:
+                print(f"save raw recording failed: {e}", flush=True)
             text = transcribe(audio)
         except Exception as e:
             print(f"transcribe error: {e}")
