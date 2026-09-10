@@ -92,5 +92,5 @@ jobs:
             3. If macOS says the app "cannot be verified": open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. (Alternative: `xattr -dr com.apple.quarantine /Applications/vlow.app`.)
             4. Grant **Microphone** and **Accessibility** when prompted, then relaunch vlow.
 
-            Apple Silicon only, macOS 14+. The first launch downloads the Whisper model (~3 GB) to `~/.cache/huggingface`.
-            Configuration lives in `~/.config/vlow/config.toml` — see the README.
+            Apple Silicon only, macOS 14+. On first launch vlow opens Settings and offers to download the on-device Whisper model (~3 GB, one time); AssemblyAI-only users can skip it.
+            Everything else is in the menubar → Settings…; later versions install themselves via Check for Updates….

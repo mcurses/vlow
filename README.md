@@ -28,12 +28,19 @@ Python, MLX, the glass overlay) — nothing else to install.
   `xattr -dr com.apple.quarantine /Applications/vlow.app`).
 - Grant **Microphone** and **Accessibility** when asked, then relaunch
   vlow (permission changes don't apply to a running process).
-- The first launch downloads the Whisper model (~3 GB) to
-  `~/.cache/huggingface/hub/` — the menubar icon stays dimmed until it's
-  ready.
+- On first launch vlow opens **Settings** and asks you to download the
+  on-device Whisper model (one time, about 3 GB, into
+  `~/.cache/huggingface/hub/`) — click **Download…** and watch the progress
+  bar. If you only want the AssemblyAI cloud backend, skip it and enter
+  your API key instead.
 - Configure everything from the menubar icon → **Settings…** (⌘,): hotkey,
-  mode, backend, AssemblyAI key and known words. Changes apply immediately.
-  Add vlow to *Login Items* if you want it to start with your Mac.
+  mode, backend, model download, AssemblyAI key and known words. Changes
+  apply immediately. Add vlow to *Login Items* if you want it to start
+  with your Mac.
+- **Updates:** menubar icon → **Check for Updates…**, or let the daily
+  automatic check tell you. Installing an update downloads the new DMG,
+  swaps the app in place and relaunches it. Because the build is ad-hoc
+  signed, macOS asks for Accessibility again after each update.
 
 Releases are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml);
 see [Building the DMG](#building-the-dmg) to build one yourself.
@@ -48,9 +55,10 @@ cd /path/to/vlow
 uv sync
 ```
 
-First run downloads the `mlx-community/whisper-large-v3-mlx` weights
-(~3 GB) to `~/.cache/huggingface/hub/`. Unauthenticated downloads are
-rate-limited; if it's slow, generate a token at
+The `mlx-community/whisper-large-v3-mlx` weights (~3 GB) are downloaded
+on request — Settings → On-device model → Download — into
+`~/.cache/huggingface/hub/`; vlow never fetches them silently. Unauthenticated
+downloads are rate-limited; if it's slow, generate a token at
 [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 and write it to `~/.cache/huggingface/token` (mode 600).
 
@@ -80,11 +88,26 @@ The current backend appears in the menubar dropdown header; switch it in
 
 Menubar icon → **Settings…** (or ⌘, while the menu is open) opens a
 System-Settings-style window (SwiftUI, `native/VlowSettings.swift`) for
-the hotkey, mode, backend, auto threshold, AssemblyAI key and language,
-and the known-words list. There is no Save button: every edit is written
-to `~/.config/vlow/config.toml` and applied live — the hotkey monitor is
+the hotkey, mode, backend, auto threshold, the on-device model download
+(status, progress bar), AssemblyAI key and language, the known-words list,
+and update checking. There is no Save button: every edit is written to
+`~/.config/vlow/config.toml` and applied live — the hotkey monitor is
 rebuilt, the backend re-warmed, known words are picked up by the next
 recording.
+
+If the on-device model is missing when it's needed, vlow shows the warning
+icon, posts a notification and opens Settings instead of downloading
+behind your back (`src/vlow/whisper_model.py`).
+
+## Updates
+
+Menubar icon → **Check for Updates…** asks the GitHub Releases API for
+the latest tag (`src/vlow/updater.py`). A daily background check does the
+same unless you turn it off in Settings → Updates. When a newer version
+exists, the downloaded app offers *Install and Relaunch*: it fetches the
+DMG, mounts it, swaps `vlow.app` in place (old copy kept until the new one
+is in position) and relaunches. Source checkouts are just pointed at the
+Releases page.
 
 On first launch vlow creates `config.toml` from whatever is in effect
 (`.env` / environment) with one example known word, `vlow`.
@@ -104,6 +127,7 @@ auto_threshold_sec = 60     # used when backend = "auto"
 assemblyai_api_key = "…"    # or ASSEMBLYAI_API_KEY in .env / the environment
 aai_language = "de"         # empty / omitted → AssemblyAI auto-detects
 known_words = ["EMMA Studio", "vlow"]   # bias all backends toward these names
+check_updates = true        # daily GitHub Releases check
 ```
 
 `known_words` is applied everywhere transcription happens:
@@ -390,7 +414,9 @@ src/vlow/
 ├── resources.py       finds icons / dylib / .env in both the checkout and the .app
 ├── config.py          config.toml + .env loading, env mirroring
 ├── settings.py        settings schema, validation, TOML writer, first-run seeding
-└── settings_window.py PyObjC bridge to the SwiftUI Settings window
+├── settings_window.py PyObjC bridge to the SwiftUI Settings window
+├── whisper_model.py   on-device model status + download with progress
+└── updater.py         GitHub Releases check, DMG download, in-place swap, relaunch
 native/
 ├── VlowGlass.swift    SwiftUI glass pill (→ libVlowGlass.dylib)
 ├── VlowSettings.swift SwiftUI Settings window (same dylib)
