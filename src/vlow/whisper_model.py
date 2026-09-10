@@ -65,6 +65,11 @@ def _gb(n: int | float) -> str:
 # __init__, so we must remember the unit ourselves instead of reading
 # self.unit. As a fallback, a poller sums the bytes landing in the repo's
 # blobs/ folder. Whichever is larger wins.
+#
+# The hf_xet fast path is switched off for this download: measured on the
+# 3 GB weights file it reported nothing for ~250 s and only wrote the file
+# at the very end, so the user would stare at an idle bar. The plain HTTP
+# path streams into blobs/*.incomplete and ticks the bar per chunk.
 
 _lock = threading.Lock()
 _active: dict | None = None  # {"done": bytes, "total": bytes, "cb": callback, "last": ts}
@@ -157,6 +162,8 @@ def download(on_status: StatusCallback) -> None:
         if _active is not None:
             return
         _active = {"done": 0, "tqdm": 0, "total": APPROX_BYTES, "cb": on_status, "last": 0.0}
+    xet_was_disabled = hf_constants.HF_HUB_DISABLE_XET
+    hf_constants.HF_HUB_DISABLE_XET = True
     try:
         on_status(status())
         _active["total"] = _total_bytes()
@@ -166,5 +173,7 @@ def download(on_status: StatusCallback) -> None:
         _active = None
         on_status({"state": "error", "progress": 0.0, "detail": f"Download failed: {e}"})
         raise
+    finally:
+        hf_constants.HF_HUB_DISABLE_XET = xet_was_disabled
     _active = None
     on_status(status())
