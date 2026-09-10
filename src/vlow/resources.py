@@ -20,18 +20,22 @@ def bundle_contents() -> Path | None:
     return None
 
 
-def menubar_icon_dir() -> Path:
+def _bundled_or_repo(bundle_rel: str, repo_rel: str) -> Path:
+    """Prefer the file inside the bundle, but fall back to the checkout: the
+    thin launchd bundle (scripts/build-app-bundle.sh) has the same
+    Contents/MacOS layout yet ships no resources of its own."""
     contents = bundle_contents()
-    if contents is not None:
-        return contents / "Resources" / "menubar"
-    return _REPO_ROOT / "assets" / "menubar"
+    if contents is not None and (contents / bundle_rel).exists():
+        return contents / bundle_rel
+    return _REPO_ROOT / repo_rel
+
+
+def menubar_icon_dir() -> Path:
+    return _bundled_or_repo("Resources/menubar", "assets/menubar")
 
 
 def glass_dylib() -> Path:
-    contents = bundle_contents()
-    if contents is not None:
-        return contents / "Frameworks" / "libVlowGlass.dylib"
-    return _REPO_ROOT / "dist" / "libVlowGlass.dylib"
+    return _bundled_or_repo("Frameworks/libVlowGlass.dylib", "dist/libVlowGlass.dylib")
 
 
 def dotenv_candidates() -> list[Path]:
