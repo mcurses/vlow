@@ -19,7 +19,15 @@ struct SettingsData: Codable, Equatable {
     var assemblyai_api_key = ""
     var aai_language = ""
     var known_words: [String] = []
+    var check_updates = true
     var config_path = ""
+    var app_version = ""
+}
+
+struct ModelStatus: Codable, Equatable {
+    var state = "unknown"  // missing | downloading | ready | error
+    var progress: Double = 0
+    var detail = ""
 }
 
 struct KnownWord: Identifiable, Equatable {
@@ -31,7 +39,10 @@ struct KnownWord: Identifiable, Equatable {
 public final class VlowSettingsModel: NSObject, ObservableObject {
     @Published var data = SettingsData()
     @Published var words: [KnownWord] = []
+    @Published var modelStatus = ModelStatus()
+    @Published var updateStatus = ""
     var onChange: ((String) -> Void)?
+    var onAction: ((String) -> Void)?
 
     private var lastJSON = ""
     private var bag = Set<AnyCancellable>()
@@ -135,12 +146,45 @@ private struct SettingsView: View {
             } footer: {
                 switch model.data.backend {
                 case "mlx":
-                    Text("Runs entirely on this Mac. The first launch downloads the Whisper model (~3 GB).")
+                    Text("Runs entirely on this Mac using the on-device model below.")
                 case "assemblyai":
                     Text("Every recording is uploaded to AssemblyAI.")
                 default:
                     Text("Short recordings stay on-device; longer ones are uploaded to AssemblyAI.")
                 }
+            }
+
+            Section {
+                LabeledContent {
+                    switch model.modelStatus.state {
+                    case "ready":
+                        Label("Ready", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .labelStyle(.titleAndIcon)
+                    case "downloading":
+                        HStack(spacing: 8) {
+                            ProgressView(value: model.modelStatus.progress)
+                                .frame(width: 140)
+                            Text(model.modelStatus.progress.formatted(.percent.precision(.fractionLength(0))))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 40, alignment: .trailing)
+                        }
+                    case "error":
+                        Button("Retry Download") { model.onAction?("downloadModel") }
+                    default:
+                        Button("Download…") { model.onAction?("downloadModel") }
+                    }
+                } label: {
+                    Text("Whisper large-v3")
+                    Text(model.modelStatus.detail)
+                        .font(.caption)
+                        .foregroundStyle(model.modelStatus.state == "error" ? .red : .secondary)
+                }
+            } header: {
+                Text("On-device model")
+            } footer: {
+                Text("Needed for the on-device and auto backends. Downloaded once from Hugging Face (about 3 GB) into ~/.cache/huggingface; the AssemblyAI backend works without it.")
             }
 
             Section {
@@ -195,6 +239,22 @@ private struct SettingsView: View {
             }
 
             Section {
+                LabeledContent {
+                    Button("Check Now") { model.onAction?("checkUpdates") }
+                } label: {
+                    Text("Version \(model.data.app_version)")
+                    if !model.updateStatus.isEmpty {
+                        Text(model.updateStatus).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Toggle("Check for updates automatically", isOn: $model.data.check_updates)
+            } header: {
+                Text("Updates")
+            } footer: {
+                Text("Updates come from the vlow GitHub releases. Installing one replaces the app and relaunches it; macOS will ask for Accessibility again afterwards.")
+            }
+
+            Section {
                 LabeledContent("Config file") {
                     Button("Show in Finder") {
                         NSWorkspace.shared.selectFile(model.data.config_path, inFileViewerRootedAtPath: "")
@@ -218,14 +278,19 @@ public final class VlowSettings: NSObject {
 
     /// Show (or bring forward) the settings window. `json` is the current
     /// configuration; each change is delivered as JSON to
-    /// `[target performSelector:selector withObject:json]` on the main thread.
+    /// `[target performSelector:selector withObject:json]` on the main thread,
+    /// button presses (e.g. "downloadModel") to `actionSelector` as a string.
     @MainActor
-    @objc(show:target:selector:)
-    public static func show(_ json: String, target: NSObject, selector: String) {
+    @objc(show:target:selector:actionSelector:)
+    public static func show(_ json: String, target: NSObject, selector: String, actionSelector: String) {
         model.load(json: json)
         let sel = NSSelectorFromString(selector)
+        let actionSel = NSSelectorFromString(actionSelector)
         model.onChange = { [weak target] out in
             _ = target?.perform(sel, with: out as NSString)
+        }
+        model.onAction = { [weak target] name in
+            _ = target?.perform(actionSel, with: name as NSString)
         }
         if window == nil {
             let host = NSHostingController(rootView: SettingsView(model: model))
@@ -242,6 +307,22 @@ public final class VlowSettings: NSObject {
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    @MainActor
+    @objc(setUpdateStatus:)
+    public static func setUpdateStatus(_ text: String) {
+        model.updateStatus = text
+    }
+
+    /// Update the on-device model row: {"state","progress","detail"}.
+    @MainActor
+    @objc(setModelStatus:)
+    public static func setModelStatus(_ json: String) {
+        guard let raw = json.data(using: .utf8),
+              let parsed = try? JSONDecoder().decode(ModelStatus.self, from: raw)
+        else { return }
+        model.modelStatus = parsed
     }
 
     /// Replace the window's contents (e.g. after config.toml changed on disk).

@@ -17,6 +17,7 @@ from Foundation import NSOperationQueue
 
 from .audio import Recorder, default_input_name, list_input_devices, refresh_devices
 from . import settings as settings_mod
+from . import updater, whisper_model
 from .config import load as load_config
 from .diag import Watchdog
 from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetector
@@ -31,7 +32,7 @@ from .paste import (
 )
 from .recordings import LATEST_PATH as RECORDING_PATH, reveal_in_finder, save_float32
 from .replay import ReplayHotkey
-from .settings_window import open_settings
+from .settings_window import open_settings, set_model_status, set_update_status
 from .stream_aai import StreamingSession
 from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
 
@@ -59,7 +60,13 @@ class State(Enum):
 
 
 def on_main_thread(fn):
-    NSOperationQueue.mainQueue().addOperationWithBlock_(fn)
+    def guarded():
+        try:
+            fn()
+        except Exception as e:  # an exception escaping into AppKit aborts the process
+            _log(f"main-thread callback failed: {e!r}")
+
+    NSOperationQueue.mainQueue().addOperationWithBlock_(guarded)
 
 
 VALID_MODES = ("toggle", "ptt")
@@ -99,6 +106,9 @@ class VlowApp(rumps.App):
         self._last_text = ""
         self._replay = ReplayHotkey(lambda: self._last_text)
         self._ready = False
+        self._model_prompted = False  # auto-open Settings for the download once per run
+        self._update_busy = False
+        self._update_offered: str | None = None  # version already shown by the auto-check
 
         self._hotkey = self._make_detector(self._mode, self._config["hotkey"])
 
@@ -112,6 +122,7 @@ class VlowApp(rumps.App):
         self._replay_item = rumps.MenuItem("Re-paste Last", callback=self._menu_replay)
         self._reveal_item = rumps.MenuItem("Reveal Last Recording", callback=self._menu_reveal)
         self._settings_item = rumps.MenuItem("Settings…", callback=self._menu_settings, key=",")
+        self._update_item = rumps.MenuItem("Check for Updates…", callback=self._menu_check_updates)
         self._device_menu = rumps.MenuItem("Input Device")
         self._populate_device_menu()
         self.menu = [
@@ -125,6 +136,7 @@ class VlowApp(rumps.App):
             self._reveal_item,
             None,
             self._settings_item,
+            self._update_item,
             None,
         ]
 
@@ -145,11 +157,140 @@ class VlowApp(rumps.App):
         )
 
     def _menu_settings(self, _) -> None:
+        self._open_settings()
+
+    def _open_settings(self) -> None:
         try:
-            open_settings(settings_mod.current(), self._apply_settings)
+            open_settings(settings_mod.current(), self._apply_settings, self._on_settings_action)
+            set_model_status(whisper_model.status())
         except Exception as e:
             _log(f"settings window failed: {e}")
             rumps.notification("vlow", "Settings unavailable", str(e))
+
+    def _on_settings_action(self, name: str) -> None:
+        _log(f"settings action: {name}")
+        if name == "downloadModel":
+            if whisper_model.is_downloading():
+                return
+            threading.Thread(target=self._download_model, daemon=True).start()
+        elif name == "checkUpdates":
+            self._check_updates(interactive=True)
+
+    # --- updates ---------------------------------------------------------
+
+    def _menu_check_updates(self, _) -> None:
+        self._check_updates(interactive=True)
+
+    def _check_updates(self, interactive: bool) -> None:
+        if self._update_busy:
+            return
+        self._update_busy = True
+        self._set_update_status("Checking…")
+        threading.Thread(target=self._do_check_updates, args=(interactive,), daemon=True).start()
+
+    def _do_check_updates(self, interactive: bool) -> None:
+        try:
+            info = updater.check()
+        except updater.UpdateError as e:
+            msg = str(e)  # bind now: `e` is gone once the except block ends
+            _log(f"update check failed: {msg}")
+            self._update_busy = False
+            self._set_update_status(msg)
+            if interactive:
+                on_main_thread(lambda: rumps.alert("Check for Updates", msg))
+            return
+        self._update_busy = False
+        if not info["is_newer"]:
+            _log(f"up to date ({info['current']})")
+            self._set_update_status(f"You're up to date ({info['current']}).")
+            if interactive:
+                on_main_thread(
+                    lambda: rumps.alert("You're up to date", f"vlow {info['current']} is the latest version.")
+                )
+            return
+        _log(f"update available: {info['current']} → {info['latest']}")
+        self._set_update_status(f"Version {info['latest']} is available.")
+        if not interactive and self._update_offered == info["latest"]:
+            return
+        self._update_offered = info["latest"]
+        on_main_thread(lambda: self._offer_update(info))
+
+    def _offer_update(self, info: dict) -> None:
+        if updater.can_self_update():
+            choice = rumps.alert(
+                f"vlow {info['latest']} is available",
+                f"You have {info['current']}. Install it now? vlow downloads the update, "
+                "replaces itself and relaunches. macOS will ask for Accessibility again.",
+                ok="Install and Relaunch",
+                cancel="Later",
+            )
+            if choice == 1:
+                threading.Thread(target=self._install_update, args=(info,), daemon=True).start()
+        else:
+            choice = rumps.alert(
+                f"vlow {info['latest']} is available",
+                f"You have {info['current']}. This copy runs from source, so grab the new "
+                "DMG from GitHub.",
+                ok="Open Releases",
+                cancel="Later",
+            )
+            if choice == 1:
+                import subprocess as _sp
+
+                _sp.run(["open", info["notes_url"]], check=False)
+
+    def _install_update(self, info: dict) -> None:
+        if self._update_busy:
+            return
+        self._update_busy = True
+        on_main_thread(lambda: self._set_status_icon("busy"))
+        rumps.notification("vlow", f"Downloading {info['latest']}…", "vlow relaunches when it's done.")
+        try:
+            updater.install(info["url"], on_progress=lambda frac, text: self._set_update_status(text))
+        except updater.UpdateError as e:
+            msg = str(e)
+            _log(f"update failed: {msg}")
+            self._update_busy = False
+            self._set_update_status(f"Update failed: {msg}")
+            on_main_thread(lambda: self._set_status_icon("idle" if self._ready else "error"))
+            on_main_thread(lambda: rumps.alert("Update failed", msg))
+
+    def _set_update_status(self, text: str) -> None:
+        def push() -> None:
+            try:
+                set_update_status(text)
+            except Exception:
+                pass  # window never opened / dylib missing — status is only cosmetic
+
+        on_main_thread(push)
+
+    def _auto_update_loop(self) -> None:
+        """Daily background check, opt-out via Settings → Updates."""
+        time.sleep(45)  # let warmup and the first-run prompts settle
+        while True:
+            try:
+                if settings_mod.current().get("check_updates", True):
+                    self._check_updates(interactive=False)
+            except Exception as e:
+                _log(f"auto update check error: {e}")
+            time.sleep(24 * 3600)
+
+    def _download_model(self) -> None:
+        def push(st: dict) -> None:
+            on_main_thread(lambda: set_model_status(st))
+
+        try:
+            whisper_model.download(push)
+        except Exception as e:
+            _log(f"model download failed: {e}")
+            rumps.notification("vlow", "Model download failed", str(e))
+            return
+        _log(f"model downloaded ({whisper_model.size_on_disk() / 1e9:.1f} GB)")
+        rumps.notification("vlow", "Whisper model ready", "Loading it now…")
+        self._warmup()
+
+    def _needs_model(self) -> bool:
+        return self._mode != "ptt" and backend_name() in ("mlx", "auto")
 
     def _apply_settings(self, data: dict) -> None:
         """Called (main thread) for every debounced edit in the Settings window."""
@@ -303,6 +444,7 @@ class VlowApp(rumps.App):
         )
         self._watchdog.start()
         _log("watchdog started (ping 60s, heartbeat ~5min, `kill -USR1` dumps stacks)")
+        threading.Thread(target=self._auto_update_loop, daemon=True).start()
 
     def _probe_main(self) -> str:
         """Runs on the main thread via the watchdog ping; summarizes UI health."""
@@ -329,6 +471,20 @@ class VlowApp(rumps.App):
             if self._mode == "ptt":
                 if not _os.environ.get("ASSEMBLYAI_API_KEY"):
                     raise RuntimeError("ASSEMBLYAI_API_KEY required for ptt mode.")
+            elif self._needs_model() and not whisper_model.is_downloaded():
+                # Never pull 3 GB behind the user's back: point them at the
+                # Download button instead (and open Settings the first time).
+                _log("whisper model not downloaded — waiting for the user")
+                on_main_thread(lambda: self._set_status_icon("error"))
+                rumps.notification(
+                    "vlow needs the Whisper model",
+                    "One-time download, about 3 GB",
+                    "Open Settings → On-device model → Download.",
+                )
+                if not self._model_prompted:
+                    self._model_prompted = True
+                    on_main_thread(self._open_settings)
+                return
             else:
                 # toggle mode: mlx for batch; aai key needed for the hold gesture.
                 warmup()

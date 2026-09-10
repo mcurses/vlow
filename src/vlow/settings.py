@@ -24,6 +24,7 @@ DEFAULTS: dict = {
     "assemblyai_api_key": "",
     "aai_language": "",
     "known_words": ["vlow"],
+    "check_updates": True,
 }
 
 _HEADER = """\
@@ -47,6 +48,9 @@ def current() -> dict:
         out[key] = value
     out = normalize(out)
     out["config_path"] = str(CONFIG_PATH)
+    from .updater import current_version  # local import: updater pulls in AppKit lazily
+
+    out["app_version"] = current_version()
     return out
 
 
@@ -86,6 +90,9 @@ def normalize(data: dict) -> dict:
         if w and w not in words:
             words.append(w)
     out["known_words"] = words
+
+    raw = data.get("check_updates", DEFAULTS["check_updates"])
+    out["check_updates"] = raw if isinstance(raw, bool) else str(raw).lower() in ("1", "true", "yes")
     return out
 
 
