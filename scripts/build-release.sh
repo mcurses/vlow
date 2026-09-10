@@ -52,15 +52,24 @@ uv python install "$PY_MINOR"
 # cd away from the repo so uv doesn't hand us the project .venv.
 PY_SRC="$(cd / && { uv python find --managed-python "$PY_MINOR" 2>/dev/null \
       || uv python find --python-preference only-managed "$PY_MINOR"; })"
-PY_ROOT="$(cd "$(dirname "$PY_SRC")/.." && pwd)"
+# Physical path: on CI the install dir is reached through a symlink, and
+# `cp -R` of a symlinked directory copies the *link*, leaving the bundle
+# pointing outside itself (codesign: "invalid destination for symbolic link").
+PY_ROOT="$(cd "$(dirname "$PY_SRC")/.." && pwd -P)"
 echo "    using $PY_ROOT"
 
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$CONTENTS/Frameworks"
-cp -R "$PY_ROOT" "$PY_DST"
+cp -R "$PY_ROOT/" "$PY_DST"
+[ -d "$PY_DST" ] && [ ! -L "$PY_DST" ] || { echo "Error: $PY_DST is not a real directory" >&2; exit 1; }
 # Our copy is not uv-managed anymore; let `uv pip` install into it.
 rm -f "$PY_DST/lib/python$PY_MINOR/EXTERNALLY-MANAGED"
 PY="$PY_DST/bin/python$PY_MINOR"
+PY_PREFIX="$("$PY" -c 'import sys; print(sys.prefix)')"
+case "$PY_PREFIX" in
+  "$PY_DST"*) ;;
+  *) echo "Error: bundled python resolves to $PY_PREFIX, not inside the bundle" >&2; exit 1 ;;
+esac
 
 # --- 3. Launcher -------------------------------------------------------------
 # Must be compiled while include/ still exists (it is trimmed below).

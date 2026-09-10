@@ -67,6 +67,7 @@ jobs:
           VLOW_SIGN_IDENTITY: ${{ env.MACOS_SIGN_IDENTITY || '-' }}
           VLOW_NOTARIZE: ${{ env.APPLE_ID != '' && env.MACOS_SIGN_IDENTITY != '' && '1' || '' }}
         run: |
+          set -o pipefail
           sw_vers
           xcodebuild -version
           scripts/build-release.sh 2>&1 | grep -v 'replacing existing signature'
