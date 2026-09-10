@@ -16,6 +16,7 @@ from ApplicationServices import (
 from Foundation import NSOperationQueue
 
 from .audio import Recorder, default_input_name, list_input_devices, refresh_devices
+from . import settings as settings_mod
 from .config import load as load_config
 from .diag import Watchdog
 from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetector
@@ -30,6 +31,7 @@ from .paste import (
 )
 from .recordings import LATEST_PATH as RECORDING_PATH, reveal_in_finder, save_float32
 from .replay import ReplayHotkey
+from .settings_window import open_settings
 from .stream_aai import StreamingSession
 from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
 
@@ -80,6 +82,8 @@ class VlowApp(rumps.App):
         super().__init__("vlow", quit_button="Quit")
         self._status_key = ""
         self._set_status_icon("loading")
+        if settings_mod.ensure_config_file():
+            _log(f"created default config at {settings_mod.CONFIG_PATH}")
         self._config = load_config()
         self._mode = self._config.get("mode", "toggle")
         if self._mode not in VALID_MODES:
@@ -96,19 +100,7 @@ class VlowApp(rumps.App):
         self._replay = ReplayHotkey(lambda: self._last_text)
         self._ready = False
 
-        if self._mode == "ptt":
-            self._hotkey = HoldDetector(
-                self._start_stream,
-                self._stop_stream,
-                hotkey=self._config["hotkey"],
-            )
-        else:  # toggle — double-tap = batch, hold = streaming
-            self._hotkey = TapHoldDetector(
-                on_double_tap=self._on_double_tap,
-                on_hold_start=self._start_stream,
-                on_hold_end=self._stop_stream,
-                hotkey=self._config["hotkey"],
-            )
+        self._hotkey = self._make_detector(self._mode, self._config["hotkey"])
 
         # Menubar fallbacks — reliable escape hatches if the hotkey misfires.
         self._mode_item = rumps.MenuItem(f"Mode: {self._mode}")
@@ -119,6 +111,7 @@ class VlowApp(rumps.App):
         self._discard_item = rumps.MenuItem("Discard Recording", callback=self._menu_discard)
         self._replay_item = rumps.MenuItem("Re-paste Last", callback=self._menu_replay)
         self._reveal_item = rumps.MenuItem("Reveal Last Recording", callback=self._menu_reveal)
+        self._settings_item = rumps.MenuItem("Settings…", callback=self._menu_settings, key=",")
         self._device_menu = rumps.MenuItem("Input Device")
         self._populate_device_menu()
         self.menu = [
@@ -131,12 +124,67 @@ class VlowApp(rumps.App):
             self._replay_item,
             self._reveal_item,
             None,
+            self._settings_item,
+            None,
         ]
 
         # NSEvent monitor + NSPanel + threads don't actually need NSApp.run()
         # to be active; both rumps.Timer and NSOperationQueue main-queue
         # one-shots were never firing on macOS 26, so run setup inline.
         self._deferred_setup(None)
+
+    def _make_detector(self, mode: str, hotkey: str):
+        if mode == "ptt":
+            return HoldDetector(self._start_stream, self._stop_stream, hotkey=hotkey)
+        # toggle — double-tap = batch, hold = streaming
+        return TapHoldDetector(
+            on_double_tap=self._on_double_tap,
+            on_hold_start=self._start_stream,
+            on_hold_end=self._stop_stream,
+            hotkey=hotkey,
+        )
+
+    def _menu_settings(self, _) -> None:
+        try:
+            open_settings(settings_mod.current(), self._apply_settings)
+        except Exception as e:
+            _log(f"settings window failed: {e}")
+            rumps.notification("vlow", "Settings unavailable", str(e))
+
+    def _apply_settings(self, data: dict) -> None:
+        """Called (main thread) for every debounced edit in the Settings window."""
+        before = settings_mod.current()
+        try:
+            new = settings_mod.normalize(data)
+        except ValueError as e:
+            _log(f"settings rejected: {e}")
+            return
+        settings_mod.save(new)
+        settings_mod.apply_env(new)
+        self._config = load_config()
+        changed = {k for k in new if new[k] != before.get(k)}
+        _log(f"settings saved ({', '.join(sorted(changed)) or 'no change'})")
+
+        if changed & {"hotkey", "mode"}:
+            try:
+                self._hotkey.stop()
+            except Exception as e:
+                _log(f"hotkey stop failed: {e}")
+            self._mode = new["mode"]
+            self._mode_item.title = f"Mode: {self._mode}"
+            self._hotkey = self._make_detector(new["mode"], new["hotkey"])
+            try:
+                self._hotkey.start()
+                _log(f"hotkey monitor restarted ({type(self._hotkey).__name__}, {new['hotkey']})")
+            except Exception as e:
+                _log(f"hotkey restart failed: {e}")
+        if changed & {"backend", "auto_threshold_sec"}:
+            self._backend_item.title = _backend_label()
+        if changed & {"backend", "mode", "assemblyai_api_key"}:
+            # A new backend may need its model loaded / key verified.
+            self._ready = False
+            self._set_status_icon("loading")
+            threading.Thread(target=self._warmup, daemon=True).start()
 
     def _populate_device_menu(self) -> None:
         try:

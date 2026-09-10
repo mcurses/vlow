@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Compile the SwiftUI glass overlay module to dist/libVlowGlass.dylib.
+# Compile the SwiftUI modules (glass overlay + settings window) to
+# dist/libVlowGlass.dylib.
 # Requires the Xcode (or CLT) Swift toolchain with the macOS 26 SDK.
 
 set -euo pipefail
@@ -17,6 +18,7 @@ swiftc -O -emit-library \
   -module-name VlowGlass \
   -target arm64-apple-macosx26.0 \
   -o "$OUT" \
-  "$PROJECT_DIR/native/VlowGlass.swift"
+  "$PROJECT_DIR/native/VlowGlass.swift" \
+  "$PROJECT_DIR/native/VlowSettings.swift"
 
 echo "Built $OUT"
