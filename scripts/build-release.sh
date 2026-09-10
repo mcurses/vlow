@@ -80,7 +80,9 @@ log "Installing locked dependencies into the bundle"
 REQ="$(mktemp -t vlow-req).txt"
 (cd "$PROJECT_DIR" && uv export --frozen --no-dev --no-emit-project --no-hashes -o "$REQ" >/dev/null)
 uv pip install --python "$PY" --compile-bytecode -r "$REQ"
-uv pip install --python "$PY" --compile-bytecode --no-deps "$PROJECT_DIR"
+# --no-cache: uv keys source-tree builds on pyproject.toml, not on the
+# sources, so a cached wheel would silently ship stale code.
+uv pip install --python "$PY" --compile-bytecode --no-deps --no-cache "$PROJECT_DIR"
 rm -f "$REQ"
 
 # torch is a declared mlx-whisper dependency but only imported by its
