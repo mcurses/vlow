@@ -31,10 +31,9 @@ Python, MLX, the glass overlay) — nothing else to install.
 - The first launch downloads the Whisper model (~3 GB) to
   `~/.cache/huggingface/hub/` — the menubar icon stays dimmed until it's
   ready.
-- Configuration is `~/.config/vlow/config.toml` (see
-  [User config](#user-config)); that's also where the AssemblyAI key
-  goes (`assemblyai_api_key = "…"`). Add vlow to *Login Items* if you
-  want it to start with your Mac.
+- Configure everything from the menubar icon → **Settings…** (⌘,): hotkey,
+  mode, backend, AssemblyAI key and known words. Changes apply immediately.
+  Add vlow to *Login Items* if you want it to start with your Mac.
 
 Releases are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml);
 see [Building the DMG](#building-the-dmg) to build one yourself.
@@ -63,9 +62,8 @@ and write it to `~/.cache/huggingface/token` (mode 600).
 | `assemblyai`  | `VLOW_BACKEND=assemblyai` | Cloud, paid, needs network. ~3–6s upload/queue overhead per call. |
 | `auto`        | `VLOW_BACKEND=auto`       | Route by duration — short clips → `mlx`, long ones → `assemblyai`. |
 
-For AssemblyAI (or `auto`), also set `ASSEMBLYAI_API_KEY=<key>` — via
-`.env` in the checkout, `~/.config/vlow/.env`, or `assemblyai_api_key` in
-`config.toml` (the latter two are the options for the downloaded app).
+For AssemblyAI (or `auto`), also set the API key — in **Settings…**, or as
+`ASSEMBLYAI_API_KEY` in `.env` / `~/.config/vlow/.env`.
 Language defaults to auto-detect; force one with `VLOW_AAI_LANGUAGE=de`
 (any ISO 639-1 code). Speech models are
 `["universal-3-pro", "universal-2"]` in fallback order.
@@ -75,21 +73,36 @@ with `VLOW_AUTO_THRESHOLD_SEC=120` (env) or `auto_threshold_sec = 120`
 in `~/.config/vlow/config.toml`. The menubar header shows the active
 threshold while in auto mode.
 
-The current backend appears in the menubar dropdown header. To switch,
-quit, change config, and relaunch.
+The current backend appears in the menubar dropdown header; switch it in
+**Settings…** — it applies without a relaunch.
+
+## Settings
+
+Menubar icon → **Settings…** (or ⌘, while the menu is open) opens a
+System-Settings-style window (SwiftUI, `native/VlowSettings.swift`) for
+the hotkey, mode, backend, auto threshold, AssemblyAI key and language,
+and the known-words list. There is no Save button: every edit is written
+to `~/.config/vlow/config.toml` and applied live — the hotkey monitor is
+rebuilt, the backend re-warmed, known words are picked up by the next
+recording.
+
+On first launch vlow creates `config.toml` from whatever is in effect
+(`.env` / environment) with one example known word, `vlow`.
 
 ## User config
 
-Optional TOML file at `~/.config/vlow/config.toml`. All keys are
-optional; env vars (and `.env`) override TOML.
+`~/.config/vlow/config.toml` is the central config — the Settings window
+writes it, but it's plain TOML you can also edit by hand. Keys set there
+override `.env` and environment variables; keys left out fall back to
+them.
 
 ```toml
 hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
 mode = "toggle"             # toggle (default; double-tap + hold) or ptt (hold-only)
 backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
-assemblyai_api_key = "…"    # alternative to the ASSEMBLYAI_API_KEY env var
 auto_threshold_sec = 60     # used when backend = "auto"
-aai_language = "de"         # omit for AssemblyAI auto-detection
+assemblyai_api_key = "…"    # or ASSEMBLYAI_API_KEY in .env / the environment
+aai_language = "de"         # empty / omitted → AssemblyAI auto-detects
 known_words = ["EMMA Studio", "vlow"]   # bias all backends toward these names
 ```
 
@@ -374,9 +387,13 @@ src/vlow/
 │                      compiled by scripts/build-glass.sh)
 ├── paste.py           pbcopy + synthesized Cmd+V via CGEvent
 ├── replay.py          pynput global Ctrl+Cmd+V → re-paste last text
-└── resources.py       finds icons / dylib / .env in both the checkout and the .app
+├── resources.py       finds icons / dylib / .env in both the checkout and the .app
+├── config.py          config.toml + .env loading, env mirroring
+├── settings.py        settings schema, validation, TOML writer, first-run seeding
+└── settings_window.py PyObjC bridge to the SwiftUI Settings window
 native/
 ├── VlowGlass.swift    SwiftUI glass pill (→ libVlowGlass.dylib)
+├── VlowSettings.swift SwiftUI Settings window (same dylib)
 └── launcher.c         vlow.app main executable: embeds libpython, runs -m vlow
 scripts/
 ├── build-release.sh   self-contained vlow.app + DMG (what CI ships)
