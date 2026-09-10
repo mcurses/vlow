@@ -1,0 +1,96 @@
+# Build a self-contained vlow.app + DMG on every version tag and attach it to
+# a GitHub Release. `workflow_dispatch` builds the same DMG as a downloadable
+# artifact without publishing a release (for trying out the pipeline).
+#
+# Signing is optional. Without secrets the app is ad-hoc signed and users have
+# to allow it once in System Settings → Privacy & Security. To ship a
+# notarized build, add these repository secrets:
+#   MACOS_CERTIFICATE_P12        base64 of the Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD   password of that .p12
+#   MACOS_SIGN_IDENTITY          e.g. "Developer ID Application: Name (TEAMID)"
+#   APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD   for notarytool
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-dmg:
+    name: Build DMG (Apple Silicon)
+    runs-on: macos-26
+    env:
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import Developer ID certificate
+        if: env.MACOS_CERTIFICATE_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PW="$(openssl rand -hex 16)"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build vlow.app and DMG
+        env:
+          VLOW_VERSION: ${{ steps.version.outputs.version }}
+          VLOW_SIGN_IDENTITY: ${{ env.MACOS_SIGN_IDENTITY || '-' }}
+          VLOW_NOTARIZE: ${{ env.APPLE_ID != '' && env.MACOS_SIGN_IDENTITY != '' && '1' || '' }}
+        run: |
+          sw_vers
+          xcodebuild -version
+          scripts/build-release.sh 2>&1 | grep -v 'replacing existing signature'
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: vlow-${{ steps.version.outputs.version }}-arm64
+          path: dist/vlow-*.dmg
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/vlow-*.dmg
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            1. Download `vlow-${{ steps.version.outputs.version }}-arm64.dmg` below and open it.
+            2. Drag **vlow** into **Applications**, then launch it.
+            3. If macOS says the app "cannot be verified": open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. (Alternative: `xattr -dr com.apple.quarantine /Applications/vlow.app`.)
+            4. Grant **Microphone** and **Accessibility** when prompted, then relaunch vlow.
+
+            Apple Silicon only, macOS 14+. The first launch downloads the Whisper model (~3 GB) to `~/.cache/huggingface`.
+            Configuration lives in `~/.config/vlow/config.toml` — see the README.

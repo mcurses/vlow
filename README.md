@@ -15,6 +15,32 @@ Apple Silicon only (MLX). Tested on macOS 26.
 
 ## Install
 
+### Download the app
+
+Grab the latest `vlow-<version>-arm64.dmg` from
+[Releases](https://github.com/mcurses/vlow/releases), open it and drag
+**vlow** into **Applications**. The bundle is self-contained (its own
+Python, MLX, the glass overlay) — nothing else to install.
+
+- The build is ad-hoc signed, so on first launch macOS may say the app
+  "cannot be verified". Open **System Settings → Privacy & Security**,
+  scroll down and click **Open Anyway** (or run
+  `xattr -dr com.apple.quarantine /Applications/vlow.app`).
+- Grant **Microphone** and **Accessibility** when asked, then relaunch
+  vlow (permission changes don't apply to a running process).
+- The first launch downloads the Whisper model (~3 GB) to
+  `~/.cache/huggingface/hub/` — the menubar icon stays dimmed until it's
+  ready.
+- Configuration is `~/.config/vlow/config.toml` (see
+  [User config](#user-config)); that's also where the AssemblyAI key
+  goes (`assemblyai_api_key = "…"`). Add vlow to *Login Items* if you
+  want it to start with your Mac.
+
+Releases are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml);
+see [Building the DMG](#building-the-dmg) to build one yourself.
+
+### From source
+
 Requires [`uv`](https://docs.astral.sh/uv/) and `ffmpeg`.
 
 ```bash
@@ -37,7 +63,9 @@ and write it to `~/.cache/huggingface/token` (mode 600).
 | `assemblyai`  | `VLOW_BACKEND=assemblyai` | Cloud, paid, needs network. ~3–6s upload/queue overhead per call. |
 | `auto`        | `VLOW_BACKEND=auto`       | Route by duration — short clips → `mlx`, long ones → `assemblyai`. |
 
-For AssemblyAI (or `auto`), also set `ASSEMBLYAI_API_KEY=<key>`.
+For AssemblyAI (or `auto`), also set `ASSEMBLYAI_API_KEY=<key>` — via
+`.env` in the checkout, `~/.config/vlow/.env`, or `assemblyai_api_key` in
+`config.toml` (the latter two are the options for the downloaded app).
 Language defaults to auto-detect; force one with `VLOW_AAI_LANGUAGE=de`
 (any ISO 639-1 code). Speech models are
 `["universal-3-pro", "universal-2"]` in fallback order.
@@ -59,6 +87,7 @@ optional; env vars (and `.env`) override TOML.
 hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
 mode = "toggle"             # toggle (default; double-tap + hold) or ptt (hold-only)
 backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
+assemblyai_api_key = "…"    # alternative to the ASSEMBLYAI_API_KEY env var
 auto_threshold_sec = 60     # used when backend = "auto"
 aai_language = "de"         # omit for AssemblyAI auto-detection
 known_words = ["EMMA Studio", "vlow"]   # bias all backends toward these names
@@ -297,6 +326,37 @@ Roughly 8–10× realtime on M-series for `large-v3`.
   runloop stops servicing pings for ~3 min while the app is idle, it
   dumps stacks and exits so launchd relaunches it.
 
+## Building the DMG
+
+```bash
+scripts/build-release.sh              # → dist/release/vlow.app + dist/vlow-<version>-arm64.dmg
+VLOW_SKIP_DMG=1 scripts/build-release.sh   # just the .app
+```
+
+The script downloads a relocatable CPython 3.12 (python-build-standalone,
+via `uv python install`), installs the locked dependencies into it
+(minus `torch`, which mlx-whisper declares but never imports at
+runtime), compiles `native/launcher.c` — a tiny executable that embeds
+libpython and runs `-m vlow`, so TCC sees `vlow` rather than `python` —
+adds the icons and `libVlowGlass.dylib`, signs everything, runs an
+import smoke test from inside the bundle, and wraps it in a DMG. About
+90 s on an M-series Mac; the result is ~600 MB unpacked, ~240 MB as DMG.
+
+Signing defaults to ad-hoc. For a Developer ID build set
+`VLOW_SIGN_IDENTITY="Developer ID Application: …"` (adds hardened
+runtime + `scripts/entitlements.plist`) and, to notarize, `VLOW_NOTARIZE=1`
+with `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`.
+
+CI does the same on `macos-26` runners: pushing a tag `v*` builds the DMG
+and attaches it to a GitHub Release; *Run workflow* on the Actions tab
+builds a downloadable artifact without releasing. Add the secrets listed
+at the top of `.github/workflows/release.yml` to get signed, notarized
+releases instead of ad-hoc ones.
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 ## Layout
 
 ```
@@ -313,5 +373,13 @@ src/vlow/
 │                      glass pill (native/VlowGlass.swift → dist/libVlowGlass.dylib,
 │                      compiled by scripts/build-glass.sh)
 ├── paste.py           pbcopy + synthesized Cmd+V via CGEvent
-└── replay.py          pynput global Ctrl+Cmd+V → re-paste last text
+├── replay.py          pynput global Ctrl+Cmd+V → re-paste last text
+└── resources.py       finds icons / dylib / .env in both the checkout and the .app
+native/
+├── VlowGlass.swift    SwiftUI glass pill (→ libVlowGlass.dylib)
+└── launcher.c         vlow.app main executable: embeds libpython, runs -m vlow
+scripts/
+├── build-release.sh   self-contained vlow.app + DMG (what CI ships)
+├── build-app-bundle.sh  thin launchd wrapper around the local .venv
+└── entitlements.plist hardened-runtime entitlements for signed builds
 ```
