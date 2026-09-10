@@ -1,7 +1,6 @@
 import ctypes
 import threading
 import time
-from pathlib import Path
 
 import objc
 from AppKit import (
@@ -26,7 +25,9 @@ from Foundation import (
     NSUserDefaults,
 )
 
-_DYLIB = Path(__file__).resolve().parents[2] / "dist" / "libVlowGlass.dylib"
+from .resources import glass_dylib
+
+_DYLIB = glass_dylib()
 _HIDE_DELAY_SEC = 0.55  # let the dematerialize transition finish first
 
 

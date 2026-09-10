@@ -4,8 +4,9 @@ import os
 import tomllib
 from pathlib import Path
 
+from .resources import dotenv_candidates
+
 CONFIG_PATH = Path.home() / ".config" / "vlow" / "config.toml"
-ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 _DEFAULTS = {
     "hotkey": "fn",
@@ -24,10 +25,17 @@ def known_words() -> list[str]:
 
 
 def load_dotenv() -> None:
-    """Load .env from the project root into os.environ (won't overwrite existing vars)."""
-    if not ENV_PATH.exists():
-        return
-    for line in ENV_PATH.read_text().splitlines():
+    """Load .env files into os.environ (won't overwrite existing vars).
+
+    Checked in order: the repo root (dev checkout), then ~/.config/vlow/.env
+    (the release bundle has no repo). setdefault keeps the first hit."""
+    for path in dotenv_candidates():
+        if path.exists():
+            _load_env_file(path)
+
+
+def _load_env_file(path: Path) -> None:
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -40,6 +48,7 @@ def load_dotenv() -> None:
 
 
 _TOML_TO_ENV = {
+    "assemblyai_api_key": "ASSEMBLYAI_API_KEY",
     "backend": "VLOW_BACKEND",
     "auto_threshold_sec": "VLOW_AUTO_THRESHOLD_SEC",
     "aai_language": "VLOW_AAI_LANGUAGE",

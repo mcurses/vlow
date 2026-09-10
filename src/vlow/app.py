@@ -20,6 +20,7 @@ from .config import load as load_config
 from .diag import Watchdog
 from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetector
 from .overlay import Overlay
+from .resources import menubar_icon_dir
 from .paste import (
     POST_PASTE_WAIT_SEC,
     paste,
@@ -64,7 +65,7 @@ VALID_MODES = ("toggle", "ptt")
 # Menubar status icons (SF Symbol renders, see scripts/gen-menubar-icons.py).
 # key → (filename, is_template). Template icons adapt to menubar appearance;
 # the recording icon stays system-red.
-_ICON_DIR = Path(__file__).resolve().parents[2] / "assets" / "menubar"
+_ICON_DIR = menubar_icon_dir()
 _STATUS_ICONS = {
     "loading": ("mic-dim.png", True),
     "idle": ("mic.png", True),
