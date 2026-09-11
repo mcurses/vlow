@@ -424,7 +424,7 @@ at the top of `.github/workflows/release.yml` to get signed, notarized
 releases instead of ad-hoc ones.
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.1 && git push origin v0.1.1
 ```
 
 ## Layout

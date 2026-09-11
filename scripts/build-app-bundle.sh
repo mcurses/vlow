@@ -45,9 +45,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.1.1</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>0.1.1</string>
     <key>LSUIElement</key>
     <true/>
     <key>LSMinimumSystemVersion</key>
