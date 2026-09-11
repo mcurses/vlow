@@ -1,5 +1,6 @@
 import sys
 import threading
+import traceback
 import time
 from enum import Enum
 from pathlib import Path
@@ -676,7 +677,11 @@ class VlowApp(rumps.App):
                 print(f"save raw recording failed: {e}", flush=True)
             text = transcribe(audio)
         except Exception as e:
-            print(f"transcribe error: {e}")
+            # stdout is a file under launchd (block-buffered): flush, or the
+            # error sits in the buffer while the log shows "0 chars".
+            _log(f"transcribe error: {e!r}")
+            traceback.print_exc()
+            sys.stderr.flush()
         on_main_thread(lambda: self._finish(text))
 
     def _finish(self, text: str) -> None:

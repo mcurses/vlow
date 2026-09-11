@@ -4,9 +4,17 @@ Parakeet is a Conformer/TDT model rather than an encoder-decoder like Whisper:
 several times faster on Apple Silicon, 25 European languages, no per-window
 language token (so mixed German/English fares better), but also no
 initial_prompt — known words are corrected after the fact instead.
+
+Everything that touches the model runs on one dedicated worker thread. MLX
+streams are thread-bound, and parakeet-mlx's greedy decoder fails with
+"There is no Stream(gpu, 0) in current thread" when the model is first run on
+one thread (the app's warmup) and then used from another (the app's
+transcription worker). Funnelling load, warmup and decode through a single
+thread sidesteps that for good; callers still block until the result is in.
 """
 
-import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, TypeVar
 
 import mlx.core as mx
 import numpy as np
@@ -24,23 +32,27 @@ SAMPLE_RATE = 16000
 CHUNK_SEC = 120.0
 OVERLAP_SEC = 15.0
 
-_model = None
-_lock = threading.Lock()
+_T = TypeVar("_T")
+_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="parakeet")
+_model = None  # only ever touched on the worker thread
+
+
+def _on_worker(fn: Callable[[], _T]) -> _T:
+    return _worker.submit(fn).result()
 
 
 def _load():
     global _model
-    with _lock:
-        if _model is None:
-            from parakeet_mlx import from_pretrained
+    if _model is None:
+        from parakeet_mlx import from_pretrained
 
-            path = local_path(PARAKEET)
-            if path is None:
-                raise ModelNotDownloaded(PARAKEET)
-            # Local snapshot path, not the repo id: the bundle runs with the
-            # Hugging Face hub in offline mode and must never fetch here.
-            _model = from_pretrained(str(path), dtype=mx.bfloat16)
-        return _model
+        path = local_path(PARAKEET)
+        if path is None:
+            raise ModelNotDownloaded(PARAKEET)
+        # Local snapshot path, not the repo id: the bundle runs with the
+        # Hugging Face hub in offline mode and must never fetch here.
+        _model = from_pretrained(str(path), dtype=mx.bfloat16)
+    return _model
 
 
 def _generate(model, audio: np.ndarray):
@@ -86,9 +98,7 @@ def _generate_chunked(model, audio: np.ndarray):
     return sentences_to_result(tokens_to_sentences(all_tokens, DecodingConfig().sentence))
 
 
-def warmup() -> None:
-    if not is_downloaded(PARAKEET):
-        raise ModelNotDownloaded(PARAKEET)
+def _warmup_on_worker() -> None:
     model = _load()
     try:
         _generate(model, np.zeros(SAMPLE_RATE, dtype=np.float32))
@@ -96,11 +106,7 @@ def warmup() -> None:
         mx.clear_cache()
 
 
-def transcribe(audio: np.ndarray) -> str:
-    if audio.size < MIN_SAMPLES:
-        return ""
-    if not is_downloaded(PARAKEET):
-        raise ModelNotDownloaded(PARAKEET)
+def _transcribe_on_worker(audio: np.ndarray) -> str:
     model = _load()
     try:
         if audio.size / SAMPLE_RATE <= CHUNK_SEC:
@@ -111,4 +117,19 @@ def transcribe(audio: np.ndarray) -> str:
         # Same reasoning as transcribe_mlx._release_buffers: hand MLX's
         # between-dictation buffer cache back; the loaded weights stay put.
         mx.clear_cache()
-    return apply_known_words(result.text.strip(), known_words())
+    return result.text.strip()
+
+
+def warmup() -> None:
+    if not is_downloaded(PARAKEET):
+        raise ModelNotDownloaded(PARAKEET)
+    _on_worker(_warmup_on_worker)
+
+
+def transcribe(audio: np.ndarray) -> str:
+    if audio.size < MIN_SAMPLES:
+        return ""
+    if not is_downloaded(PARAKEET):
+        raise ModelNotDownloaded(PARAKEET)
+    text = _on_worker(lambda: _transcribe_on_worker(audio))
+    return apply_known_words(text, known_words())
