@@ -1,4 +1,4 @@
-"""Push-to-talk streaming via AssemblyAI Universal Streaming.
+"""Push-to-talk streaming via AssemblyAI Universal-3.5 Pro Streaming.
 
 Mic frames flow callback → queue → generator → SDK WebSocket.
 Turn events surface to caller-supplied on_partial / on_final callbacks.
@@ -15,7 +15,10 @@ import sounddevice as sd
 
 SAMPLE_RATE = 16000
 CHUNK_SAMPLES = 1600  # 100 ms at 16 kHz
-SPEECH_MODEL = "u3-rt-pro"
+# Universal-3.5 Pro Realtime: code-switches mid-sentence, ~285 ms median
+# time-to-final. Its turns are always formatted, so no format_turns here —
+# end_of_turn alone marks a final, formatted turn.
+SPEECH_MODEL = "universal-3-5-pro"
 
 
 class StreamingSession:
@@ -63,7 +66,6 @@ class StreamingSession:
         params = {
             "sample_rate": SAMPLE_RATE,
             "speech_model": SPEECH_MODEL,
-            "format_turns": True,
         }
         words = known_words()
         if words:

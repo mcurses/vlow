@@ -1,9 +1,11 @@
 version = 1
 requires-python = ">=3.11"
 resolution-markers = [
-    "python_full_version < '3.14' and platform_system == 'Linux'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and platform_system == 'Linux'",
+    "python_full_version < '3.12' and platform_system == 'Linux'",
     "python_full_version >= '3.14' and platform_system == 'Linux'",
-    "python_full_version < '3.14' and platform_system != 'Linux'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and platform_system != 'Linux'",
+    "python_full_version < '3.12' and platform_system != 'Linux'",
     "python_full_version >= '3.14' and platform_system != 'Linux'",
 ]
 
@@ -40,7 +42,7 @@ wheels = [
 
 [[package]]
 name = "assemblyai"
-version = "0.64.3"
+version = "1.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -49,9 +51,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/cf/749048698da4a469a9ca1afc36e437ecd36b415a626f3f00ac5ce7aaf6f5/assemblyai-0.64.3.tar.gz", hash = "sha256:6fffa15cb7942184ebbe43867a244568fab507d5e09548ba728da47ca241be7e", size = 71386 }
+sdist = { url = "https://files.pythonhosted.org/packages/f9/3e/c7562933b21ce187f620eddf1ec7f1bac90aa9947065ac505e5a7d169aab/assemblyai-1.5.2.tar.gz", hash = "sha256:f1092270345bf4af2271eb00b1c42e041c687aae8524da6058a89fe411001fdb", size = 144429 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/f2/ff2044c128b783ebea34806d9cb2a2ac9d2a5d86d642fc7f9fbf807057c5/assemblyai-0.64.3-py3-none-any.whl", hash = "sha256:3ee8806fd27ce4004d35d6cbc63564ffd1c7ddad97375f780f4ee3353282d907", size = 62864 },
+    { url = "https://files.pythonhosted.org/packages/b7/18/704ad4692fec5ef545d052121da322a8959ae688984a4cf14e724540707c/assemblyai-1.5.2-py3-none-any.whl", hash = "sha256:2262e40cf9f92c6c8b858dfb56c52bc0387ecc0a987b74a47016a28ad30042ca", size = 142356 },
 ]
 
 [[package]]
@@ -1719,7 +1721,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "assemblyai", specifier = ">=0.30.0" },
+    { name = "assemblyai", specifier = ">=1.5.2" },
     { name = "mlx-whisper", specifier = ">=0.4.0" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pynput", specifier = ">=1.7.7" },

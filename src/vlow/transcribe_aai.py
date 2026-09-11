@@ -6,7 +6,9 @@ import numpy as np
 
 from .config import known_words
 
-MODELS = ["universal-3-pro", "universal-2"]
+# Universal-3.5 Pro handles mid-sentence code-switching (18 languages incl.
+# de/en) natively once language_detection is on; universal-2 is the fallback.
+MODELS = ["universal-3-5-pro", "universal-2"]
 MIN_SAMPLES = 1600
 SAMPLE_RATE = 16000
 
@@ -32,7 +34,7 @@ def _build_config():
 
     words = known_words()
     if words:
-        # keyterms_prompt biases the universal-3 models; word_boost covers the
+        # keyterms_prompt biases the universal-3.x models; word_boost covers the
         # universal-2 fallback. Both can be set safely.
         extras["keyterms_prompt"] = words
         extras["word_boost"] = words
