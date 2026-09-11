@@ -1,9 +1,12 @@
 # vlow
 
 Local voice dictation for macOS. Double-tap Right Option to toggle recording;
-the transcript is pasted into whatever app currently has focus. Uses
-`mlx-whisper` with `large-v3` for on-device transcription — no network, no
-API key, handles per-token German/English code-switching.
+the transcript is pasted into whatever app currently has focus. Runs
+on-device via MLX — Whisper `large-v3` or Parakeet TDT v3, your pick — with
+no network and no API key; an AssemblyAI cloud backend is optional and the
+only route with live streaming. Mixed German/English dictation is a design
+goal: Parakeet and AssemblyAI handle it within a sentence, Whisper less so
+(see [On-device models](#on-device-models)).
 
 Apple Silicon only (MLX). Tested on macOS 26.
 
@@ -40,13 +43,14 @@ cask version.
   `xattr -dr com.apple.quarantine /Applications/vlow.app`).
 - Grant **Microphone** and **Accessibility** when asked, then relaunch
   vlow (permission changes don't apply to a running process).
-- On first launch vlow opens **Settings** and asks you to download the
-  on-device Whisper model (one time, about 3 GB, into
-  `~/.cache/huggingface/hub/`) — click **Download…** and watch the progress
-  bar. If you only want the AssemblyAI cloud backend, skip it and enter
-  your API key instead.
+- On first launch vlow opens **Settings** and asks you to download an
+  on-device model (one time, into `~/.cache/huggingface/hub/`): Whisper
+  large-v3 (about 3 GB) or Parakeet TDT v3 (about 2.5 GB) — click
+  **Download…** next to the one you want and watch the progress bar. If you
+  only want the AssemblyAI cloud backend, skip it and enter your API key
+  instead.
 - Configure everything from the menubar icon → **Settings…** (⌘,): hotkey,
-  mode, backend, model download, AssemblyAI key and known words. Changes
+  mode, backend, on-device model, AssemblyAI key and known words. Changes
   apply immediately. Add vlow to *Login Items* if you want it to start
   with your Mac.
 - **Updates:** menubar icon → **Check for Updates…**, or let the daily
@@ -67,9 +71,10 @@ cd /path/to/vlow
 uv sync
 ```
 
-The `mlx-community/whisper-large-v3-mlx` weights (~3 GB) are downloaded
-on request — Settings → On-device model → Download — into
-`~/.cache/huggingface/hub/`; vlow never fetches them silently. Unauthenticated
+The model weights (`mlx-community/whisper-large-v3-mlx`, ~3 GB, and/or
+`mlx-community/parakeet-tdt-0.6b-v3`, ~2.5 GB) are downloaded on request —
+Settings → On-device model → Download — into `~/.cache/huggingface/hub/`;
+vlow never fetches them silently. Unauthenticated
 downloads are rate-limited; if it's slow, generate a token at
 [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 and write it to `~/.cache/huggingface/token` (mode 600).
@@ -78,15 +83,27 @@ and write it to `~/.cache/huggingface/token` (mode 600).
 
 | Backend       | Env                       | Notes                                                              |
 |---------------|---------------------------|--------------------------------------------------------------------|
-| `mlx` (default) | `VLOW_BACKEND=mlx`        | Local, offline, free. Apple Silicon only. ~8–10× realtime.        |
+| `mlx` (default) | `VLOW_BACKEND=mlx`        | Local, offline, free. Apple Silicon only. Whisper or Parakeet, see below. |
 | `assemblyai`  | `VLOW_BACKEND=assemblyai` | Cloud, paid, needs network. ~3–6s upload/queue overhead per call. |
 | `auto`        | `VLOW_BACKEND=auto`       | Route by duration — short clips → `mlx`, long ones → `assemblyai`. |
 
+### On-device models
+
+Both run through MLX; pick one in **Settings → On-device model** (or
+`local_model` in `config.toml` / `VLOW_LOCAL_MODEL`). Download either or both.
+
+| `local_model`            | Weights                                  | Size   | Languages | Speed (M-series) | Mixed German/English |
+|--------------------------|------------------------------------------|--------|-----------|------------------|----------------------|
+| `whisper-large-v3` (default) | `mlx-community/whisper-large-v3-mlx` | ~3 GB  | 99        | ~6–10× realtime  | Weak: Whisper commits to one language per 30 s window, so English terms inside German speech get mangled or translated. Best for monolingual German. |
+| `parakeet-tdt-0.6b-v3`   | `mlx-community/parakeet-tdt-0.6b-v3`     | ~2.5 GB | 25 (European incl. de/en) | ~25× realtime    | Good: no language token, transcribes what it hears. No prompt biasing, so known words are fixed up afterwards. |
+
 For AssemblyAI (or `auto`), also set the API key — in **Settings…**, or as
 `ASSEMBLYAI_API_KEY` in `.env` / `~/.config/vlow/.env`.
-Language defaults to auto-detect; force one with `VLOW_AAI_LANGUAGE=de`
-(any ISO 639-1 code). Speech models are
-`["universal-3-pro", "universal-2"]` in fallback order.
+Language defaults to auto-detect, which on Universal-3.5 Pro also enables
+mid-sentence code-switching across 18 languages; force one with
+`VLOW_AAI_LANGUAGE=de` (any ISO 639-1 code). Speech models are
+`["universal-3-5-pro", "universal-2"]` in fallback order; the hold gesture
+streams through Universal-3.5 Pro Realtime.
 
 For `auto` mode, the duration threshold is 60s by default. Change it
 with `VLOW_AUTO_THRESHOLD_SEC=120` (env) or `auto_threshold_sec = 120`
@@ -100,16 +117,16 @@ The current backend appears in the menubar dropdown header; switch it in
 
 Menubar icon → **Settings…** (or ⌘, while the menu is open) opens a
 System-Settings-style window (SwiftUI, `native/VlowSettings.swift`) for
-the hotkey, mode, backend, auto threshold, the on-device model download
-(status, progress bar), AssemblyAI key and language, the known-words list,
-and update checking. There is no Save button: every edit is written to
+the hotkey, mode, backend, auto threshold, the on-device model (picker
+plus a download row per model with progress bar), AssemblyAI key and
+language, the known-words list, and update checking. There is no Save button: every edit is written to
 `~/.config/vlow/config.toml` and applied live — the hotkey monitor is
 rebuilt, the backend re-warmed, known words are picked up by the next
 recording.
 
-If the on-device model is missing when it's needed, vlow shows the warning
-icon, posts a notification and opens Settings instead of downloading
-behind your back (`src/vlow/whisper_model.py`).
+If the selected on-device model is missing when it's needed, vlow shows the
+warning icon, posts a notification and opens Settings instead of downloading
+behind your back (`src/vlow/local_models.py`).
 
 ## Updates
 
@@ -135,6 +152,7 @@ them.
 hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
 mode = "toggle"             # toggle (default; double-tap + hold) or ptt (hold-only)
 backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
+local_model = "whisper-large-v3"   # or parakeet-tdt-0.6b-v3 — the model behind "mlx"
 auto_threshold_sec = 60     # used when backend = "auto"
 assemblyai_api_key = "…"    # or ASSEMBLYAI_API_KEY in .env / the environment
 aai_language = "de"         # empty / omitted → AssemblyAI auto-detects
@@ -143,7 +161,10 @@ check_updates = true        # daily GitHub Releases check
 ```
 
 `known_words` is applied everywhere transcription happens:
-- MLX gets a Whisper `initial_prompt` (`"Words and names that may appear: …"`).
+- Whisper gets an `initial_prompt` (`"Words and names that may appear: …"`).
+- Parakeet has no prompt; near-miss spellings in its output are replaced by
+  the exact known word afterwards (`src/vlow/known_words_fix.py`, fuzzy
+  match, conservative threshold).
 - AssemblyAI pre-recorded gets `keyterms_prompt` *and* `word_boost` (the latter for the universal-2 fallback model) with `boost_param="high"`.
 - AssemblyAI streaming gets `keyterms_prompt` in the `StreamingParameters`.
 
@@ -413,9 +434,11 @@ src/vlow/
 ├── __main__.py        CLI entry; `vlow` runs the app, `vlow test [secs]` one-shots
 ├── app.py             rumps.App, state machine, menubar items, permission prompt
 ├── audio.py           sounddevice InputStream → numpy float32 16 kHz mono (toggle mode)
-├── transcribe.py      backend dispatcher (VLOW_BACKEND)
-├── transcribe_mlx.py  local large-v3 via mlx-whisper
-├── transcribe_aai.py  cloud universal-3-pro/2 via AssemblyAI SDK
+├── transcribe.py      backend dispatcher (VLOW_BACKEND, VLOW_LOCAL_MODEL)
+├── transcribe_mlx.py  local Whisper large-v3 via mlx-whisper
+├── transcribe_parakeet.py  local Parakeet TDT 0.6B v3 via parakeet-mlx
+├── known_words_fix.py fuzzy post-correction toward known words (Parakeet)
+├── transcribe_aai.py  cloud universal-3.5-pro/2 via AssemblyAI SDK
 ├── stream_aai.py      live AssemblyAI Universal Streaming session (ptt mode)
 ├── hotkey.py          double-tap + hold detectors over NSEvent flagsChanged
 ├── overlay.py         borderless non-activating NSPanel hosting the SwiftUI
@@ -427,7 +450,7 @@ src/vlow/
 ├── config.py          config.toml + .env loading, env mirroring
 ├── settings.py        settings schema, validation, TOML writer, first-run seeding
 ├── settings_window.py PyObjC bridge to the SwiftUI Settings window
-├── whisper_model.py   on-device model status + download with progress
+├── local_models.py    on-device model registry, status + download with progress
 └── updater.py         GitHub Releases check, DMG download, in-place swap, relaunch
 native/
 ├── VlowGlass.swift    SwiftUI glass pill (→ libVlowGlass.dylib)
