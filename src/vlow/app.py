@@ -17,7 +17,7 @@ from Foundation import NSOperationQueue
 
 from .audio import Recorder, default_input_name, list_input_devices, refresh_devices
 from . import settings as settings_mod
-from . import updater, whisper_model
+from . import local_models, updater
 from .config import load as load_config
 from .diag import Watchdog
 from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetector
@@ -39,8 +39,11 @@ from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
 
 def _backend_label() -> str:
     name = backend_name()
+    local = local_models.selected_key()
     if name == "auto":
-        return f"Backend: auto (>{auto_threshold_sec():.0f}s → assemblyai)"
+        return f"Backend: auto ({local}, >{auto_threshold_sec():.0f}s → assemblyai)"
+    if name == "mlx":
+        return f"Backend: {local}"
     return f"Backend: {name}"
 
 
@@ -162,17 +165,21 @@ class VlowApp(rumps.App):
     def _open_settings(self) -> None:
         try:
             open_settings(settings_mod.current(), self._apply_settings, self._on_settings_action)
-            set_model_status(whisper_model.status())
+            for st in local_models.all_status():
+                set_model_status(st)
         except Exception as e:
             _log(f"settings window failed: {e}")
             rumps.notification("vlow", "Settings unavailable", str(e))
 
     def _on_settings_action(self, name: str) -> None:
         _log(f"settings action: {name}")
-        if name == "downloadModel":
-            if whisper_model.is_downloading():
+        if name.startswith("downloadModel"):
+            # "downloadModel:<key>" from the per-model rows; bare form → selected.
+            _, _, key = name.partition(":")
+            model = local_models.MODELS.get(key) or local_models.selected()
+            if local_models.is_downloading():
                 return
-            threading.Thread(target=self._download_model, daemon=True).start()
+            threading.Thread(target=self._download_model, args=(model,), daemon=True).start()
         elif name == "checkUpdates":
             self._check_updates(interactive=True)
 
@@ -275,19 +282,24 @@ class VlowApp(rumps.App):
                 _log(f"auto update check error: {e}")
             time.sleep(24 * 3600)
 
-    def _download_model(self) -> None:
+    def _download_model(self, model: local_models.LocalModel) -> None:
         def push(st: dict) -> None:
             on_main_thread(lambda: set_model_status(st))
 
         try:
-            whisper_model.download(push)
+            local_models.download(model, push)
         except Exception as e:
-            _log(f"model download failed: {e}")
-            rumps.notification("vlow", "Model download failed", str(e))
+            _log(f"{model.key} download failed: {e}")
+            rumps.notification("vlow", f"{model.display} download failed", str(e))
             return
-        _log(f"model downloaded ({whisper_model.size_on_disk() / 1e9:.1f} GB)")
-        rumps.notification("vlow", "Whisper model ready", "Loading it now…")
-        self._warmup()
+        _log(f"{model.key} downloaded ({local_models.size_on_disk(model) / 1e9:.1f} GB)")
+        if model.key == local_models.selected_key():
+            rumps.notification("vlow", f"{model.display} ready", "Loading it now…")
+            self._warmup()
+        else:
+            rumps.notification(
+                "vlow", f"{model.display} ready", "Select it under On-device model to use it."
+            )
 
     def _needs_model(self) -> bool:
         return self._mode != "ptt" and backend_name() in ("mlx", "auto")
@@ -319,9 +331,9 @@ class VlowApp(rumps.App):
                 _log(f"hotkey monitor restarted ({type(self._hotkey).__name__}, {new['hotkey']})")
             except Exception as e:
                 _log(f"hotkey restart failed: {e}")
-        if changed & {"backend", "auto_threshold_sec"}:
+        if changed & {"backend", "local_model", "auto_threshold_sec"}:
             self._backend_item.title = _backend_label()
-        if changed & {"backend", "mode", "assemblyai_api_key"}:
+        if changed & {"backend", "local_model", "mode", "assemblyai_api_key"}:
             # A new backend may need its model loaded / key verified.
             self._ready = False
             self._set_status_icon("loading")
@@ -471,14 +483,15 @@ class VlowApp(rumps.App):
             if self._mode == "ptt":
                 if not _os.environ.get("ASSEMBLYAI_API_KEY"):
                     raise RuntimeError("ASSEMBLYAI_API_KEY required for ptt mode.")
-            elif self._needs_model() and not whisper_model.is_downloaded():
-                # Never pull 3 GB behind the user's back: point them at the
+            elif self._needs_model() and not local_models.is_downloaded(local_models.selected()):
+                # Never pull gigabytes behind the user's back: point them at the
                 # Download button instead (and open Settings the first time).
-                _log("whisper model not downloaded — waiting for the user")
+                model = local_models.selected()
+                _log(f"{model.key} not downloaded — waiting for the user")
                 on_main_thread(lambda: self._set_status_icon("error"))
                 rumps.notification(
-                    "vlow needs the Whisper model",
-                    "One-time download, about 3 GB",
+                    f"vlow needs {model.display}",
+                    f"One-time download, about {model.approx_bytes / 1e9:.1f} GB",
                     "Open Settings → On-device model → Download.",
                 )
                 if not self._model_prompted:

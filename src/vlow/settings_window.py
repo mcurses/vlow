@@ -66,7 +66,7 @@ def open_settings(
 
 
 def set_model_status(status: dict) -> None:
-    """Update the on-device model row: {"state", "progress", "detail"}."""
+    """Update one on-device model row: {"model", "state", "progress", "detail"}."""
     _cls().setModelStatus_(json.dumps(status))
 
 

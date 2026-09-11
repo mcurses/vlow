@@ -3,7 +3,9 @@ import mlx.core as mx
 import mlx_whisper
 
 from .config import known_words
-from .whisper_model import MODEL, ModelNotDownloaded, is_downloaded
+from .local_models import MODELS, ModelNotDownloaded, is_downloaded
+
+WHISPER = MODELS["whisper-large-v3"]
 
 MIN_SAMPLES = 1600
 
@@ -35,11 +37,11 @@ def _release_buffers() -> None:
 
 
 def warmup() -> None:
-    if not is_downloaded():
-        raise ModelNotDownloaded()
+    if not is_downloaded(WHISPER):
+        raise ModelNotDownloaded(WHISPER)
     silence = np.zeros(16000, dtype=np.float32)
     try:
-        mlx_whisper.transcribe(silence, path_or_hf_repo=MODEL, verbose=False)
+        mlx_whisper.transcribe(silence, path_or_hf_repo=WHISPER.repo, verbose=False)
     finally:
         _release_buffers()
 
@@ -47,14 +49,14 @@ def warmup() -> None:
 def transcribe(audio: np.ndarray) -> str:
     if audio.size < MIN_SAMPLES:
         return ""
-    if not is_downloaded():
-        raise ModelNotDownloaded()
+    if not is_downloaded(WHISPER):
+        raise ModelNotDownloaded(WHISPER)
     # Anti-repetition-loop settings. Whisper's autoregressive decoder is prone to
     # falling into "Das ist die Situation. Das ist die Situation. …" style loops,
     # especially on German/mixed-language audio with thinking pauses. The defaults
     # let one bad 30s window poison every following window via the prompt feedback.
     kwargs = {
-        "path_or_hf_repo": MODEL,
+        "path_or_hf_repo": WHISPER.repo,
         "verbose": False,
         "condition_on_previous_text": False,
         "compression_ratio_threshold": 2.0,

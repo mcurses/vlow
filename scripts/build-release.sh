@@ -174,7 +174,7 @@ codesign --verify --deep --strict --verbose=1 "$APP"
 log "Smoke test: importing the app stack from inside the bundle"
 "$CONTENTS/MacOS/vlow" -c "
 import sys
-import vlow.app, vlow.overlay, vlow.settings_window, vlow.updater, vlow.whisper_model, vlow.transcribe_mlx, vlow.stream_aai
+import vlow.app, vlow.overlay, vlow.settings_window, vlow.updater, vlow.local_models, vlow.transcribe_mlx, vlow.transcribe_parakeet, vlow.stream_aai
 import mlx.core, mlx_whisper, sounddevice, rumps, numba
 from vlow import resources
 assert resources.bundle_contents() is not None, sys.executable

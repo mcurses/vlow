@@ -11,10 +11,18 @@ import AppKit
 import Combine
 import SwiftUI
 
+struct LocalModelInfo: Codable, Equatable {
+    var key = ""
+    var name = ""
+    var size = ""
+    var blurb = ""
+}
+
 struct SettingsData: Codable, Equatable {
     var hotkey = "fn"
     var mode = "toggle"
     var backend = "mlx"
+    var local_model = "whisper-large-v3"
     var auto_threshold_sec: Double = 60
     var assemblyai_api_key = ""
     var aai_language = ""
@@ -22,9 +30,11 @@ struct SettingsData: Codable, Equatable {
     var check_updates = true
     var config_path = ""
     var app_version = ""
+    var local_models: [LocalModelInfo] = []  // read-only, from local_models.py
 }
 
 struct ModelStatus: Codable, Equatable {
+    var model = ""  // LocalModelInfo.key
     var state = "unknown"  // missing | downloading | ready | error
     var progress: Double = 0
     var detail = ""
@@ -39,7 +49,7 @@ struct KnownWord: Identifiable, Equatable {
 public final class VlowSettingsModel: NSObject, ObservableObject {
     @Published var data = SettingsData()
     @Published var words: [KnownWord] = []
-    @Published var modelStatus = ModelStatus()
+    @Published var modelStatus: [String: ModelStatus] = [:]  // by model key
     @Published var updateStatus = ""
     var onChange: ((String) -> Void)?
     var onAction: ((String) -> Void)?
@@ -119,7 +129,7 @@ private struct SettingsView: View {
 
             Section {
                 Picker("Backend", selection: $model.data.backend) {
-                    Text("On-device (MLX Whisper)").tag("mlx")
+                    Text("On-device (MLX)").tag("mlx")
                     Text("AssemblyAI (cloud)").tag("assemblyai")
                     Text("Auto — by duration").tag("auto")
                 }
@@ -146,7 +156,7 @@ private struct SettingsView: View {
             } footer: {
                 switch model.data.backend {
                 case "mlx":
-                    Text("Runs entirely on this Mac using the on-device model below.")
+                    Text("Runs entirely on this Mac using the on-device model selected below.")
                 case "assemblyai":
                     Text("Every recording is uploaded to AssemblyAI.")
                 default:
@@ -155,36 +165,45 @@ private struct SettingsView: View {
             }
 
             Section {
-                LabeledContent {
-                    switch model.modelStatus.state {
-                    case "ready":
-                        Label("Ready", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .labelStyle(.titleAndIcon)
-                    case "downloading":
-                        HStack(spacing: 8) {
-                            ProgressView(value: model.modelStatus.progress)
-                                .frame(width: 140)
-                            Text(model.modelStatus.progress.formatted(.percent.precision(.fractionLength(0))))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .frame(width: 40, alignment: .trailing)
-                        }
-                    case "error":
-                        Button("Retry Download") { model.onAction?("downloadModel") }
-                    default:
-                        Button("Download…") { model.onAction?("downloadModel") }
+                Picker("Model", selection: $model.data.local_model) {
+                    ForEach(model.data.local_models, id: \.key) { m in
+                        Text(m.name).tag(m.key)
                     }
-                } label: {
-                    Text("Whisper large-v3")
-                    Text(model.modelStatus.detail)
-                        .font(.caption)
-                        .foregroundStyle(model.modelStatus.state == "error" ? .red : .secondary)
+                }
+                ForEach(model.data.local_models, id: \.key) { m in
+                    let st = model.modelStatus[m.key] ?? ModelStatus()
+                    LabeledContent {
+                        switch st.state {
+                        case "ready":
+                            Label("Ready", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .labelStyle(.titleAndIcon)
+                        case "downloading":
+                            HStack(spacing: 8) {
+                                ProgressView(value: st.progress)
+                                    .frame(width: 140)
+                                Text(st.progress.formatted(.percent.precision(.fractionLength(0))))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 40, alignment: .trailing)
+                            }
+                        case "error":
+                            Button("Retry Download") { model.onAction?("downloadModel:\(m.key)") }
+                        default:
+                            Button("Download…") { model.onAction?("downloadModel:\(m.key)") }
+                        }
+                    } label: {
+                        Text(m.name)
+                        Text(st.detail.isEmpty ? m.size : st.detail)
+                            .font(.caption)
+                            .foregroundStyle(st.state == "error" ? .red : .secondary)
+                    }
                 }
             } header: {
                 Text("On-device model")
             } footer: {
-                Text("Needed for the on-device and auto backends. Downloaded once from Hugging Face (about 3 GB) into ~/.cache/huggingface; the AssemblyAI backend works without it.")
+                let blurb = model.data.local_models.first { $0.key == model.data.local_model }?.blurb ?? ""
+                Text(blurb + (blurb.isEmpty ? "" : " ") + "Needed for the on-device and auto backends; downloaded once from Hugging Face into ~/.cache/huggingface. The AssemblyAI backend works without it.")
             }
 
             Section {
@@ -315,14 +334,14 @@ public final class VlowSettings: NSObject {
         model.updateStatus = text
     }
 
-    /// Update the on-device model row: {"state","progress","detail"}.
+    /// Update one on-device model row: {"model","state","progress","detail"}.
     @MainActor
     @objc(setModelStatus:)
     public static func setModelStatus(_ json: String) {
         guard let raw = json.data(using: .utf8),
               let parsed = try? JSONDecoder().decode(ModelStatus.self, from: raw)
         else { return }
-        model.modelStatus = parsed
+        model.modelStatus[parsed.model] = parsed
     }
 
     /// Replace the window's contents (e.g. after config.toml changed on disk).

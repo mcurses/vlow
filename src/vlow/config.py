@@ -51,6 +51,7 @@ def _load_env_file(path: Path) -> None:
 TOML_TO_ENV = {
     "assemblyai_api_key": "ASSEMBLYAI_API_KEY",
     "backend": "VLOW_BACKEND",
+    "local_model": "VLOW_LOCAL_MODEL",
     "auto_threshold_sec": "VLOW_AUTO_THRESHOLD_SEC",
     "aai_language": "VLOW_AAI_LANGUAGE",
 }

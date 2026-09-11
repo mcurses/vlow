@@ -13,6 +13,7 @@ dependencies = [
     "pyobjc-framework-Quartz>=10.0",
     "rumps>=0.4.0",
     "assemblyai>=1.5.2",
+    "parakeet-mlx>=0.5.2",
 ]
 
 [project.scripts]

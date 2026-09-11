@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .config import CONFIG_PATH, TOML_TO_ENV, load as load_config
 from .hotkey import HOTKEYS
+from .local_models import DEFAULT_MODEL, MODELS
 from .transcribe import DEFAULT_AUTO_THRESHOLD_SEC, VALID_BACKENDS
 
 VALID_MODES = ("toggle", "ptt")
@@ -20,6 +21,7 @@ DEFAULTS: dict = {
     "hotkey": "fn",
     "mode": "toggle",
     "backend": "mlx",
+    "local_model": DEFAULT_MODEL,
     "auto_threshold_sec": DEFAULT_AUTO_THRESHOLD_SEC,
     "assemblyai_api_key": "",
     "aai_language": "",
@@ -48,6 +50,17 @@ def current() -> dict:
         out[key] = value
     out = normalize(out)
     out["config_path"] = str(CONFIG_PATH)
+    # The window renders the model picker and download rows from this list,
+    # so Python stays the single source of truth for names and sizes.
+    out["local_models"] = [
+        {
+            "key": m.key,
+            "name": m.display,
+            "size": f"About {m.approx_bytes / 1e9:.1f} GB",
+            "blurb": m.blurb,
+        }
+        for m in MODELS.values()
+    ]
     from .updater import current_version  # local import: updater pulls in AppKit lazily
 
     out["app_version"] = current_version()
@@ -71,6 +84,11 @@ def normalize(data: dict) -> dict:
     if backend not in VALID_BACKENDS:
         raise ValueError(f"backend must be one of {VALID_BACKENDS}, got {backend!r}")
     out["backend"] = backend
+
+    local_model = str(data.get("local_model") or DEFAULTS["local_model"]).lower()
+    if local_model not in MODELS:
+        raise ValueError(f"local_model must be one of {tuple(MODELS)}, got {local_model!r}")
+    out["local_model"] = local_model
 
     raw = data.get("auto_threshold_sec", DEFAULTS["auto_threshold_sec"])
     try:

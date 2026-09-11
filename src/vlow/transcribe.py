@@ -1,3 +1,4 @@
+import importlib
 import os
 import time
 
@@ -39,9 +40,12 @@ def _backend_for_audio(audio: np.ndarray) -> str:
 def _module(name: str):
     if name == "assemblyai":
         from . import transcribe_aai as m
-    else:
-        from . import transcribe_mlx as m
-    return m
+
+        return m
+    # "mlx" is whichever on-device model is selected (config: local_model).
+    from .local_models import selected
+
+    return importlib.import_module(f".{selected().module}", __package__)
 
 
 def warmup() -> None:
@@ -57,8 +61,14 @@ def warmup() -> None:
 def transcribe(audio: np.ndarray) -> str:
     chosen = _backend_for_audio(audio)
     duration = audio.size / SAMPLE_RATE
+    if chosen == "mlx":
+        from .local_models import selected_key
+
+        label = f"mlx/{selected_key()}"
+    else:
+        label = chosen
     if backend_name() == "auto":
-        print(f"[vlow] auto: {duration:.1f}s → {chosen}", flush=True)
+        print(f"[vlow] auto: {duration:.1f}s → {label}", flush=True)
     # Log how long it actually took, not just which backend ran. Without this
     # a slow dictation is unattributable: the mlx path can re-decode a window
     # up to 6 times on low confidence (~6x swing), while the assemblyai path
@@ -73,6 +83,6 @@ def transcribe(audio: np.ndarray) -> str:
         # raised, and a five-digit speedup in the log is just noise.
         speed = f" (x{duration / elapsed:.1f} realtime)" if elapsed >= 0.1 else ""
         print(
-            f"[vlow] {chosen}: {elapsed:.1f}s for {duration:.1f}s audio{speed}",
+            f"[vlow] {label}: {elapsed:.1f}s for {duration:.1f}s audio{speed}",
             flush=True,
         )
