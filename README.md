@@ -22,6 +22,18 @@ Grab the latest `vlow-<version>-arm64.dmg` from
 **vlow** into **Applications**. The bundle is self-contained (its own
 Python, MLX, the glass overlay) — nothing else to install.
 
+Or with Homebrew (same DMG, from the `mcurses/vlow` tap):
+
+```bash
+brew install --cask mcurses/vlow/vlow
+# ad-hoc signed → either click "Open Anyway" once, or skip quarantine:
+brew install --cask --no-quarantine mcurses/vlow/vlow
+```
+
+The cask is marked `auto_updates`, so `brew upgrade` leaves it alone and
+vlow's own updater keeps it current; `brew upgrade --greedy` forces the
+cask version.
+
 - The build is ad-hoc signed, so on first launch macOS may say the app
   "cannot be verified". Open **System Settings → Privacy & Security**,
   scroll down and click **Open Anyway** (or run

@@ -9,6 +9,11 @@
 #   MACOS_CERTIFICATE_PASSWORD   password of that .p12
 #   MACOS_SIGN_IDENTITY          e.g. "Developer ID Application: Name (TEAMID)"
 #   APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD   for notarytool
+#
+# Homebrew: after a tagged release the `bump-cask` job rewrites version and
+# sha256 in the mcurses/homebrew-vlow tap. It needs a secret TAP_GITHUB_TOKEN
+# (fine-grained PAT with Contents: read/write on that repo); without it the
+# job is skipped and the cask can be bumped by hand.
 name: Release
 
 on:
@@ -95,3 +100,36 @@ jobs:
 
             Apple Silicon only, macOS 14+. On first launch vlow opens Settings and offers to download the on-device Whisper model (~3 GB, one time); AssemblyAI-only users can skip it.
             Everything else is in the menubar → Settings…; later versions install themselves via Check for Updates….
+
+  bump-cask:
+    name: Bump Homebrew cask
+    needs: build-dmg
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    env:
+      TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+    steps:
+      - name: Skip without tap token
+        if: env.TAP_GITHUB_TOKEN == ''
+        run: echo "TAP_GITHUB_TOKEN not set — skipping cask bump" && exit 0
+
+      - uses: actions/checkout@v7
+        if: env.TAP_GITHUB_TOKEN != ''
+        with:
+          repository: mcurses/homebrew-vlow
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+      - name: Update Casks/vlow.rb
+        if: env.TAP_GITHUB_TOKEN != ''
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/vlow-${VERSION}-arm64.dmg"
+          SHA="$(curl -sSL --retry 5 --retry-delay 10 "$URL" | shasum -a 256 | cut -d' ' -f1)"
+          sed -i -E "s/^(  version ).*/\1\"${VERSION}\"/" Casks/vlow.rb
+          sed -i -E "s/^(  sha256 ).*/\1\"${SHA}\"/" Casks/vlow.rb
+          git diff --stat
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "vlow ${VERSION}" || echo "cask already up to date"
+          git push
