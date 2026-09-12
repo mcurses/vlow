@@ -136,6 +136,10 @@ class StreamingSession:
     def _on_error(self, _client, error) -> None:
         print(f"[stream_aai] error: {error}", flush=True)
 
+    def snapshot_pcm16(self) -> bytes:
+        """Raw PCM16 captured so far, without stopping (SIGTERM emergency save)."""
+        return b"".join(list(self._raw_chunks))
+
     def stop(self) -> str:
         # Order matters: stop the mic so no new chunks queue; persist raw audio
         # immediately (in case disconnect hangs); sentinel-close the generator;

@@ -14,6 +14,7 @@ the logs there was nothing to go on. Three tools fix that:
   correlated with power events.
 """
 
+import ctypes
 import faulthandler
 import os
 import signal
@@ -37,6 +38,58 @@ def install_signal_dump() -> None:
     """
     faulthandler.enable()
     faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
+
+
+_TERM_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+_term_thread = None  # keep a reference; the thread is daemonic
+
+
+def install_termination_hook(on_terminate: Callable[[], None]) -> None:
+    """Run `on_terminate()` when SIGTERM / SIGINT / SIGHUP arrives, then die
+    the way the default action would have (re-raised with SIG_DFL, so
+    launchd sees the same exit as before and `kill` semantics are kept).
+
+    Python-level signal handlers only run when the *main* thread executes
+    Python bytecode, and ours sits inside NSApp.run() — idle, or wedged,
+    for long stretches. So the handler here is a no-op and the real work
+    happens on a helper thread woken through signal.set_wakeup_fd(), which
+    the C-level trampoline writes to regardless of what the main thread is
+    doing. Must be called from the main thread (set_wakeup_fd requirement).
+    SIGKILL cannot be caught; nothing can be saved then.
+    """
+    global _term_thread
+    rfd, wfd = os.pipe()
+    os.set_blocking(wfd, False)
+    signal.set_wakeup_fd(wfd, warn_on_full_buffer=False)
+    for sig in _TERM_SIGNALS:
+        signal.signal(sig, lambda signum, frame: None)
+
+    def worker() -> None:
+        while True:
+            try:
+                data = os.read(rfd, 64)
+            except InterruptedError:
+                continue
+            hit = next((b for b in data if b in _TERM_SIGNALS), None)
+            if hit is None:
+                continue  # some other signal's wakeup byte (e.g. SIGUSR1)
+            name = signal.Signals(hit).name
+            _log(f"{name} received — running termination hook")
+            try:
+                on_terminate()
+            except Exception as e:
+                _log(f"termination hook failed: {e!r}")
+            sys.stderr.flush()
+            # Python's signal.signal() is main-thread only; reset the C-level
+            # disposition directly and re-raise so the default action runs.
+            libc = ctypes.CDLL(None)
+            libc.signal(int(hit), ctypes.c_void_p(0))  # SIG_DFL
+            os.kill(os.getpid(), int(hit))
+            time.sleep(1.0)
+            os._exit(128 + int(hit))  # belt and braces
+
+    _term_thread = threading.Thread(target=worker, name="vlow-termination", daemon=True)
+    _term_thread.start()
 
 
 _POWER_NOTIFICATIONS = [

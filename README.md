@@ -309,7 +309,11 @@ to re-grant permissions:
 Every session — batch or streaming — writes its raw audio to
 `~/Library/Application Support/vlow/last_recording.wav` before any
 network round-trip. If MLX crashes, the WebSocket hangs, or you hit
-"Discard" by mistake, the audio is still there.
+"Discard" by mistake, the audio is still there. If vlow is terminated
+mid-capture (`vlow restart`, `kill`, logout, an update relaunch), a
+SIGTERM/SIGINT/SIGHUP hook writes whatever was recorded up to that
+moment to the same file before the process exits (`src/vlow/diag.py`,
+`install_termination_hook`). SIGKILL cannot be intercepted.
 
 - **Reveal it** from the menubar dropdown → `Reveal Last Recording`,
   or open the file directly:

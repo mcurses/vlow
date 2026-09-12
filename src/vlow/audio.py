@@ -82,6 +82,15 @@ class Recorder:
             except Exception:
                 pass  # never let a UI hiccup break capture
 
+    def snapshot(self) -> np.ndarray:
+        """Everything captured so far, without stopping the stream. Safe to
+        call from any thread while the audio callback keeps appending (used
+        by the SIGTERM emergency save)."""
+        chunks = list(self._chunks)
+        if not chunks:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(chunks).flatten().astype(np.float32)
+
     def stop(self) -> np.ndarray:
         if self._stream is None:
             return np.zeros(0, dtype=np.float32)

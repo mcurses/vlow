@@ -20,7 +20,7 @@ from .audio import Recorder, default_input_name, list_input_devices, refresh_dev
 from . import settings as settings_mod
 from . import local_models, updater
 from .config import load as load_config
-from .diag import Watchdog
+from .diag import Watchdog, install_termination_hook
 from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetector
 from .overlay import Overlay
 from .resources import menubar_icon_dir
@@ -31,7 +31,7 @@ from .paste import (
     restore_clipboard,
     snapshot_clipboard,
 )
-from .recordings import LATEST_PATH as RECORDING_PATH, reveal_in_finder, save_float32
+from .recordings import LATEST_PATH as RECORDING_PATH, reveal_in_finder, save_float32, save_int16_bytes
 from .replay import ReplayHotkey
 from .settings_window import open_settings, set_model_status, set_update_progress, set_update_status
 from .stream_aai import StreamingSession
@@ -494,6 +494,10 @@ class VlowApp(rumps.App):
         )
         self._watchdog.start()
         _log("watchdog started (ping 60s, heartbeat ~5min, `kill -USR1` dumps stacks)")
+        try:
+            install_termination_hook(self.emergency_save)
+        except Exception as e:
+            _log(f"termination hook failed to install: {e}")
         threading.Thread(target=self._auto_update_loop, daemon=True).start()
 
     def _probe_main(self) -> str:
@@ -732,6 +736,22 @@ class VlowApp(rumps.App):
         if text:
             self._last_text = text
             paste(text)
+
+    def emergency_save(self) -> None:
+        """SIGTERM while capturing: write whatever audio exists so far to
+        last_recording.wav. Runs on the termination thread, touches no UI.
+        Transcribing/finalizing states already saved before they started."""
+        state = self._state
+        if state is State.RECORDING:
+            audio = self._recorder.snapshot()
+            path = save_float32(audio)
+            _log(f"emergency save: {audio.size / 16000:.1f}s of recording → {path}")
+        elif state is State.STREAMING and self._stream is not None:
+            pcm = self._stream.snapshot_pcm16()
+            path = save_int16_bytes(pcm)
+            _log(f"emergency save: {len(pcm) / 32000:.1f}s of stream → {path}")
+        else:
+            _log(f"emergency save: nothing in flight (state={state.value})")
 
     def _reset(self) -> None:
         if self._overlay is not None:
