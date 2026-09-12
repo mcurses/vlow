@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import CONFIG_PATH, TOML_TO_ENV, load as load_config
 from .hotkey import HOTKEYS
 from .local_models import DEFAULT_MODEL, MODELS
+from .replay import validate_hotkey
 from .transcribe import DEFAULT_AUTO_THRESHOLD_SEC, VALID_BACKENDS
 
 VALID_MODES = ("toggle", "ptt")
@@ -20,6 +21,7 @@ VALID_MODES = ("toggle", "ptt")
 DEFAULTS: dict = {
     "hotkey": "fn",
     "mode": "toggle",
+    "repaste_hotkey": "",  # pynput spec, e.g. "<ctrl>+<cmd>+v"; empty = off
     "backend": "mlx",
     "local_model": DEFAULT_MODEL,
     "auto_threshold_sec": DEFAULT_AUTO_THRESHOLD_SEC,
@@ -79,6 +81,8 @@ def normalize(data: dict) -> dict:
     if mode not in VALID_MODES:
         raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
     out["mode"] = mode
+
+    out["repaste_hotkey"] = validate_hotkey(str(data.get("repaste_hotkey") or ""))
 
     backend = str(data.get("backend") or DEFAULTS["backend"]).lower()
     if backend not in VALID_BACKENDS:

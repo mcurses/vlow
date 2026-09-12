@@ -117,7 +117,7 @@ The current backend appears in the menubar dropdown header; switch it in
 
 Menubar icon → **Settings…** (or ⌘, while the menu is open) opens a
 System-Settings-style window (SwiftUI, `native/VlowSettings.swift`) for
-the hotkey, mode, backend, auto threshold, the on-device model (picker
+the hotkey, mode, an optional re-paste shortcut (off by default; click **Record Shortcut** and press the keys), backend, auto threshold, the on-device model (picker
 plus a download row per model with progress bar), AssemblyAI key and
 language, the known-words list, and update checking. There is no Save button: every edit is written to
 `~/.config/vlow/config.toml` and applied live — the hotkey monitor is
@@ -151,6 +151,7 @@ them.
 ```toml
 hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
 mode = "toggle"             # toggle (default; double-tap + hold) or ptt (hold-only)
+repaste_hotkey = ""         # e.g. "<ctrl>+<cmd>+v" (pynput spec) to re-paste the last transcript; empty = off
 backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
 local_model = "whisper-large-v3"   # or parakeet-tdt-0.6b-v3 — the model behind "mlx"
 auto_threshold_sec = 60     # used when backend = "auto"
@@ -200,7 +201,7 @@ Two interaction modes, picked in `config.toml` via `mode = …`.
 |--------------------------------|----------------------------------------------|
 | Right Option × 2 (within 350 ms) | Start batch recording (mlx / assemblyai / auto). Double-tap again to stop and paste once. |
 | Hold Right Option              | Live AssemblyAI streaming. Finalized turns paste into the focused app as they arrive. Release to stop. |
-| Ctrl + Cmd + V                 | Re-paste last transcript.                    |
+| Re-paste shortcut (Settings)   | Re-paste last transcript. Off until you record one. |
 
 The hold gesture needs `ASSEMBLYAI_API_KEY`; without it, only double-tap
 batch recording works (the startup notification will tell you).
@@ -212,7 +213,7 @@ you don't want any double-tap dictation at all.
 | Gesture                        | Action                                       |
 |--------------------------------|----------------------------------------------|
 | Hold Right Option              | Live AssemblyAI streaming with progressive paste. Release to stop. |
-| Ctrl + Cmd + V                 | Re-paste last transcript.                    |
+| Re-paste shortcut (Settings)   | Re-paste last transcript. Off until you record one. |
 
 The menubar icon reflects state: mic idle, dimmed mic loading,
 red mic recording, waveform transcribing, warning triangle error
@@ -224,7 +225,7 @@ fallbacks:
 
 - `Stop & Transcribe` — same as the second double-tap
 - `Discard Recording` — drop the current buffer, no paste
-- `Re-paste Last` — same as Ctrl+Cmd+V
+- `Re-paste Last` — same as the re-paste shortcut, works without one
 
 ## Input device
 

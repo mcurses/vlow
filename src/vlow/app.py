@@ -112,7 +112,7 @@ class VlowApp(rumps.App):
         self._overlay: Overlay | None = None
         self._last_level_ts = 0.0  # throttles meter updates onto the main thread
         self._last_text = ""
-        self._replay = ReplayHotkey(lambda: self._last_text)
+        self._replay = ReplayHotkey(lambda: self._last_text, self._config.get("repaste_hotkey", ""))
         self._ready = False
         self._model_prompted = False  # auto-open Settings for the download once per run
         self._update_busy = False
@@ -336,6 +336,12 @@ class VlowApp(rumps.App):
                 _log(f"hotkey monitor restarted ({type(self._hotkey).__name__}, {new['hotkey']})")
             except Exception as e:
                 _log(f"hotkey restart failed: {e}")
+        if "repaste_hotkey" in changed:
+            try:
+                self._replay.set_hotkey(new["repaste_hotkey"])
+                _log(f"replay hotkey now {new['repaste_hotkey'] or 'none'}")
+            except Exception as e:
+                _log(f"replay hotkey change failed: {e}")
         if changed & {"backend", "local_model", "auto_threshold_sec"}:
             self._backend_item.title = _backend_label()
         if changed & {"backend", "local_model", "mode", "assemblyai_api_key"}:
@@ -447,7 +453,7 @@ class VlowApp(rumps.App):
             _log(f"hotkey start failed: {e}")
         try:
             self._replay.start()
-            _log("replay hotkey started")
+            _log(f"replay hotkey started ({self._replay.hotkey or 'none'})")
         except Exception as e:
             _log(f"replay start failed: {e}")
         self._set_status_icon("loading")

@@ -21,6 +21,7 @@ struct LocalModelInfo: Codable, Equatable {
 struct SettingsData: Codable, Equatable {
     var hotkey = "fn"
     var mode = "toggle"
+    var repaste_hotkey = ""  // pynput spec ("<ctrl>+<cmd>+v"); empty = no shortcut
     var backend = "mlx"
     var local_model = "whisper-large-v3"
     var auto_threshold_sec: Double = 60
@@ -91,6 +92,115 @@ public final class VlowSettingsModel: NSObject, ObservableObject {
     }
 }
 
+/// Records a keyboard shortcut and stores it as a pynput hotkey spec
+/// ("<ctrl>+<cmd>+v"), the format `keyboard.GlobalHotKeys` in vlow/replay.py
+/// parses. Click to record, press the combination (Escape cancels), the
+/// x clears it.
+private struct ShortcutRecorder: View {
+    @Binding var spec: String
+    @State private var recording = false
+    @State private var monitor: Any?
+
+    // pynput key names → the glyph macOS uses for them.
+    private static let glyphs: [String: String] = [
+        "ctrl": "⌃", "alt": "⌥", "shift": "⇧", "cmd": "⌘",
+        "space": "Space", "enter": "↩", "tab": "⇥", "backspace": "⌫", "delete": "⌦",
+        "esc": "⎋", "left": "←", "right": "→", "up": "↑", "down": "↓",
+        "home": "↖", "end": "↘", "page_up": "⇞", "page_down": "⇟",
+    ]
+    // NSEvent key codes for keys that have no printable character.
+    private static let specialKeys: [UInt16: String] = [
+        49: "space", 36: "enter", 76: "enter", 48: "tab", 51: "backspace", 117: "delete",
+        123: "left", 124: "right", 125: "down", 126: "up",
+        115: "home", 119: "end", 116: "page_up", 121: "page_down",
+        122: "f1", 120: "f2", 99: "f3", 118: "f4", 96: "f5", 97: "f6", 98: "f7", 100: "f8",
+        101: "f9", 109: "f10", 103: "f11", 111: "f12", 105: "f13", 107: "f14", 113: "f15",
+        106: "f16", 64: "f17", 79: "f18", 80: "f19",
+    ]
+
+    static func display(_ spec: String) -> String {
+        spec.split(separator: "+").map { part -> String in
+            let name = part.trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
+            if let g = glyphs[name] { return g }
+            return name.uppercased()
+        }.joined()
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                recording ? stop() : start()
+            } label: {
+                Text(recording ? "Press keys…" : (spec.isEmpty ? "Record Shortcut" : Self.display(spec)))
+                    .frame(minWidth: 110)
+                    .foregroundStyle(recording ? .secondary : .primary)
+            }
+            if !spec.isEmpty && !recording {
+                Button {
+                    spec = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Remove the shortcut")
+            }
+        }
+        .onDisappear { stop() }
+    }
+
+    private func start() {
+        recording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 {  // Escape cancels
+                stop()
+                return nil
+            }
+            if let parsed = Self.parse(event) {
+                spec = parsed
+                stop()
+                return nil
+            }
+            NSSound.beep()  // needs a modifier + a real key
+            return nil
+        }
+    }
+
+    private func stop() {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+        monitor = nil
+        recording = false
+    }
+
+    /// nil when the event isn't usable as a global shortcut.
+    static func parse(_ event: NSEvent) -> String? {
+        parse(keyCode: event.keyCode, flags: event.modifierFlags, characters: event.charactersIgnoringModifiers)
+    }
+
+    static func parse(keyCode: UInt16, flags rawFlags: NSEvent.ModifierFlags, characters: String?) -> String? {
+        let flags = rawFlags.intersection(.deviceIndependentFlagsMask)
+        var parts: [String] = []
+        if flags.contains(.control) { parts.append("<ctrl>") }
+        if flags.contains(.option) { parts.append("<alt>") }
+        if flags.contains(.shift) { parts.append("<shift>") }
+        if flags.contains(.command) { parts.append("<cmd>") }
+        // Shift alone would swallow ordinary typing; require a real modifier.
+        guard parts.contains(where: { $0 != "<shift>" }) else { return nil }
+
+        if let special = specialKeys[keyCode] {
+            parts.append("<\(special)>")
+            return parts.joined(separator: "+")
+        }
+        guard let chars = characters?.lowercased(),
+              chars.count == 1,
+              let ch = chars.first,
+              ch != "+", !ch.isWhitespace, !ch.isNewline,
+              ch.isLetter || ch.isNumber || ch.isPunctuation || ch.isSymbol
+        else { return nil }
+        parts.append(String(ch))
+        return parts.joined(separator: "+")
+    }
+}
+
 private struct SettingsView: View {
     @ObservedObject var model: VlowSettingsModel
     @State private var selectedWord: KnownWord.ID?
@@ -116,6 +226,14 @@ private struct SettingsView: View {
                 Picker("Mode", selection: $model.data.mode) {
                     Text("Toggle").tag("toggle")
                     Text("Push to talk").tag("ptt")
+                }
+                LabeledContent {
+                    ShortcutRecorder(spec: $model.data.repaste_hotkey)
+                } label: {
+                    Text("Re-paste last")
+                    Text("Pastes the most recent transcription again")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 Text("Dictation")
@@ -354,6 +472,19 @@ public final class VlowSettings: NSObject {
     @MainActor
     @objc public static func isVisible() -> Bool {
         window?.isVisible ?? false
+    }
+
+    /// Test hooks for the shortcut recorder: build the pynput spec the way a
+    /// key event would, and render a spec the way the button shows it.
+    /// Returns "" when the combination is not usable as a shortcut.
+    @objc(shortcutSpecForKeyCode:flags:characters:)
+    public static func shortcutSpec(forKeyCode keyCode: UInt16, flags: UInt, characters: String) -> String {
+        ShortcutRecorder.parse(keyCode: keyCode, flags: NSEvent.ModifierFlags(rawValue: flags), characters: characters) ?? ""
+    }
+
+    @objc(shortcutDisplay:)
+    public static func shortcutDisplay(_ spec: String) -> String {
+        ShortcutRecorder.display(spec)
     }
 
     /// Test hook: apply `json` as if the user had edited the form, so the

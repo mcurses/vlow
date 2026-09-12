@@ -12,6 +12,7 @@ CONFIG_PATH = Path.home() / ".config" / "vlow" / "config.toml"
 _DEFAULTS = {
     "hotkey": "fn",
     "mode": "toggle",  # "toggle" (double-tap) or "ptt" (hold-to-talk)
+    "repaste_hotkey": "",  # global shortcut for Re-paste Last; empty = none
     "known_words": [],  # bias all backends toward these names/terms
 }
 
