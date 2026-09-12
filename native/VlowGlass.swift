@@ -11,6 +11,10 @@ import SwiftUI
 
 private let barCount = 28
 private let pillSize = CGSize(width: 200, height: 52)
+// Rate at which Python pushes mic levels (one bar shift each); mirrors
+// LEVEL_PUSH_INTERVAL_SEC in vlow/app.py so the outgoing snapshot keeps
+// scrolling at the same speed as the live bars.
+private let levelPushHz = 29.0
 
 @objc(VlowGlassModel)
 public final class VlowGlassModel: NSObject, ObservableObject {
@@ -60,7 +64,7 @@ private struct BarsView: View {
                 // The outgoing recording snapshot keeps scrolling out to the
                 // left (index shift at the live push cadence) so bar motion
                 // never freezes while the wave sweeps in.
-                let scrollShift = Int(elapsed * 30.0)
+                let scrollShift = Int(elapsed * levelPushHz)
                 func source(_ mode: String, _ i: Int, scrolled: Bool) -> Double {
                     switch mode {
                     case "busy": return 0.30 + 0.24 * sin(phase + Double(i) * 0.48)

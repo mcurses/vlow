@@ -74,6 +74,10 @@ def on_main_thread(fn):
 
 
 VALID_MODES = ("toggle", "ptt")
+# ~29 level pushes/s (the 30 ms throttle gave ~32/s; 10% slower scroll of the
+# recording waveform). Mic callbacks arrive far faster than this, so the
+# throttle sets the rate.
+LEVEL_PUSH_INTERVAL_SEC = 1 / 29
 
 # Menubar status icons (SF Symbol renders, see scripts/gen-menubar-icons.py).
 # key → (filename, is_template). Template icons adapt to menubar appearance;
@@ -617,12 +621,15 @@ class VlowApp(rumps.App):
         restore_clipboard(snap)
 
     def _on_level(self, rms: float) -> None:
-        # Called from the audio callback thread; throttle to ~30 fps so the
-        # main queue isn't flooded by small-blocksize devices.
+        # Called from the audio callback thread; throttle so the main queue
+        # isn't flooded by small-blocksize devices. Each push shifts the
+        # overlay bars one step, so this interval is also the scroll speed
+        # of the recording waveform (keep LEVEL_PUSH_HZ in VlowGlass.swift
+        # in sync).
         if self._overlay is None:
             return
         now = time.monotonic()
-        if now - self._last_level_ts < 0.03:
+        if now - self._last_level_ts < LEVEL_PUSH_INTERVAL_SEC:
             return
         self._last_level_ts = now
         on_main_thread(lambda: self._overlay.push_level(rms))
