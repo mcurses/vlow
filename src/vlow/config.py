@@ -14,6 +14,8 @@ _DEFAULTS = {
     "mode": "toggle",  # "toggle" (double-tap) or "ptt" (hold-to-talk)
     "repaste_hotkey": "",  # global shortcut for Re-paste Last; empty = none
     "paste_to_origin_app": True,  # batch: deliver text to the app that was frontmost at start
+    "return_focus_after_paste": True,  # then return to the app the user is in now
+    "hold_to_stream": True,  # toggle mode: hold the hotkey to stream live (AssemblyAI)
     "known_words": [],  # bias all backends toward these names/terms
 }
 

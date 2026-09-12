@@ -158,6 +158,8 @@ hotkey = "fn"               # fn | right_opt | left_opt | right_cmd
 mode = "toggle"             # toggle (default; double-tap + hold) or ptt (hold-only)
 repaste_hotkey = ""         # e.g. "<ctrl>+<cmd>+v" (pynput spec) to re-paste the last transcript; empty = off
 paste_to_origin_app = true  # batch: paste into the app that was in front when recording started
+return_focus_after_paste = true  # ... then switch back to the app you are in now
+hold_to_stream = true       # toggle mode: hold the hotkey to stream live; false = double-tap only
 backend = "auto"            # mlx | assemblyai | auto  (ignored when mode = "ptt")
 local_model = "whisper-large-v3"   # or parakeet-tdt-0.6b-v3 — the model behind "mlx"
 auto_threshold_sec = 60     # used when backend = "auto"
@@ -215,8 +217,10 @@ batch recording works (the startup notification will tell you).
 Batch recordings remember the app that was in front when you double-tapped.
 If you have switched to another app by the time the text is ready, vlow
 brings the original app forward, pastes, and returns focus to where you
-were (Settings → *Paste into the app I started in*, on by default;
-streaming always pastes where you are).
+were (Settings → *Paste into the app I started in* and *Return to where I
+was afterwards*, both on by default; streaming always pastes where you
+are). If you never want the hold gesture, turn off *Hold to stream live*:
+the hotkey then reacts to the double-tap only.
 
 **`ptt`** — hold-only streaming variant. No double-tap behavior; the
 chosen modifier is dedicated to push-to-talk while vlow runs. Useful if

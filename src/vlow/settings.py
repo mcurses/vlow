@@ -23,6 +23,8 @@ DEFAULTS: dict = {
     "mode": "toggle",
     "repaste_hotkey": "",  # pynput spec, e.g. "<ctrl>+<cmd>+v"; empty = off
     "paste_to_origin_app": True,  # batch mode: paste into the app that was frontmost at start
+    "return_focus_after_paste": True,  # ... and then go back to where the user is now
+    "hold_to_stream": True,  # toggle mode: holding the hotkey streams live via AssemblyAI
     "backend": "mlx",
     "local_model": DEFAULT_MODEL,
     "auto_threshold_sec": DEFAULT_AUTO_THRESHOLD_SEC,
@@ -85,8 +87,8 @@ def normalize(data: dict) -> dict:
 
     out["repaste_hotkey"] = validate_hotkey(str(data.get("repaste_hotkey") or ""))
 
-    raw = data.get("paste_to_origin_app", DEFAULTS["paste_to_origin_app"])
-    out["paste_to_origin_app"] = raw if isinstance(raw, bool) else str(raw).lower() in ("1", "true", "yes")
+    for key in ("paste_to_origin_app", "return_focus_after_paste", "hold_to_stream"):
+        out[key] = _bool(data.get(key, DEFAULTS[key]))
 
     backend = str(data.get("backend") or DEFAULTS["backend"]).lower()
     if backend not in VALID_BACKENDS:
@@ -117,9 +119,12 @@ def normalize(data: dict) -> dict:
             words.append(w)
     out["known_words"] = words
 
-    raw = data.get("check_updates", DEFAULTS["check_updates"])
-    out["check_updates"] = raw if isinstance(raw, bool) else str(raw).lower() in ("1", "true", "yes")
+    out["check_updates"] = _bool(data.get("check_updates", DEFAULTS["check_updates"]))
     return out
+
+
+def _bool(raw) -> bool:
+    return raw if isinstance(raw, bool) else str(raw).lower() in ("1", "true", "yes")
 
 
 def apply_env(data: dict) -> None:

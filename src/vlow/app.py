@@ -177,6 +177,9 @@ class VlowApp(rumps.App):
     def _make_detector(self, mode: str, hotkey: str):
         if mode == "ptt":
             return HoldDetector(self._start_stream, self._stop_stream, hotkey=hotkey)
+        if not self._config.get("hold_to_stream", True):
+            # toggle without the hold gesture — double-tap only, holding does nothing
+            return DoubleTapDetector(self._on_double_tap, hotkey=hotkey)
         # toggle — double-tap = batch, hold = streaming
         return TapHoldDetector(
             on_double_tap=self._on_double_tap,
@@ -371,7 +374,7 @@ class VlowApp(rumps.App):
         changed = {k for k in new if new[k] != before.get(k)}
         _log(f"settings saved ({', '.join(sorted(changed)) or 'no change'})")
 
-        if changed & {"hotkey", "mode"}:
+        if changed & {"hotkey", "mode", "hold_to_stream"}:
             try:
                 self._hotkey.stop()
             except Exception as e:
@@ -578,6 +581,12 @@ class VlowApp(rumps.App):
                     "mode: ptt — live streaming",
                     f"Hold {hotkey_label} to talk.",
                 )
+            elif not self._config.get("hold_to_stream", True):
+                rumps.notification(
+                    "vlow ready",
+                    f"backend: {backend_name()} · hold gesture off",
+                    f"Double-tap {hotkey_label} to record.",
+                )
             else:
                 aai_ok = bool(_os.environ.get("ASSEMBLYAI_API_KEY"))
                 hold_hint = (
@@ -773,11 +782,12 @@ class VlowApp(rumps.App):
             return
         # Off the main thread: activate_and_wait polls NSWorkspace, which only
         # updates while the main runloop is free.
-        threading.Thread(target=self._deliver, args=(text, target), daemon=True).start()
+        return_focus = bool(self._config.get("return_focus_after_paste", True))
+        threading.Thread(target=self._deliver, args=(text, target, return_focus), daemon=True).start()
 
-    def _deliver(self, text: str, target) -> None:
+    def _deliver(self, text: str, target, return_focus: bool) -> None:
         try:
-            how = paste_into(text, target)
+            how = paste_into(text, target, return_focus=return_focus)
             if how != "direct":
                 _log(f"paste {how}: target {app_label(target)}")
         except Exception as e:

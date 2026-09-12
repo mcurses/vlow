@@ -23,6 +23,8 @@ struct SettingsData: Codable, Equatable {
     var mode = "toggle"
     var repaste_hotkey = ""  // pynput spec ("<ctrl>+<cmd>+v"); empty = no shortcut
     var paste_to_origin_app = true
+    var return_focus_after_paste = true
+    var hold_to_stream = true
     var backend = "mlx"
     var local_model = "whisper-large-v3"
     var auto_threshold_sec: Double = 60
@@ -234,6 +236,14 @@ private struct SettingsView: View {
                     Text("Toggle").tag("toggle")
                     Text("Push to talk").tag("ptt")
                 }
+                if model.data.mode == "toggle" {
+                    Toggle(isOn: $model.data.hold_to_stream) {
+                        Text("Hold to stream live")
+                        Text("Holding \(hotkeyName) streams via AssemblyAI; off means only the double-tap does anything")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 LabeledContent {
                     ShortcutRecorder(spec: $model.data.repaste_hotkey)
                 } label: {
@@ -244,17 +254,26 @@ private struct SettingsView: View {
                 }
                 Toggle(isOn: $model.data.paste_to_origin_app) {
                     Text("Paste into the app I started in")
-                    Text("Double-tap recordings go back to the app that was in front when you started, then focus returns to where you are")
+                    Text("Double-tap recordings go back to the app that was in front when you started")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Toggle(isOn: $model.data.return_focus_after_paste) {
+                    Text("Return to where I was afterwards")
+                    Text("Off keeps the original app in front after the paste")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .disabled(!model.data.paste_to_origin_app)
             } header: {
                 Text("Dictation")
             } footer: {
                 if model.data.mode == "ptt" {
                     Text("Hold \(hotkeyName) to stream live via AssemblyAI; release to stop.")
-                } else {
+                } else if model.data.hold_to_stream {
                     Text("Double-tap \(hotkeyName) to start recording and again to stop and paste. Hold it to stream live via AssemblyAI.")
+                } else {
+                    Text("Double-tap \(hotkeyName) to start recording and again to stop and paste.")
                 }
             }
 
