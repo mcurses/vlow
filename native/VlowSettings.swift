@@ -223,6 +223,21 @@ private struct SettingsView: View {
         }
     }
 
+    /// Deleting gigabytes deserves a question first; the actual removal
+    /// happens in Python ("removeModel:<key>").
+    private func confirmRemove(_ m: LocalModelInfo, detail: String) {
+        let alert = NSAlert()
+        alert.messageText = "Remove \(m.name)?"
+        alert.informativeText = "\(detail). The files are deleted from ~/.cache/huggingface; you can download the model again any time."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        if alert.runModal() == .alertFirstButtonReturn {
+            model.onAction?("removeModel:\(m.key)")
+        }
+    }
+
     var body: some View {
         Form {
             Section {
@@ -325,9 +340,12 @@ private struct SettingsView: View {
                     LabeledContent {
                         switch st.state {
                         case "ready":
-                            Label("Ready", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .labelStyle(.titleAndIcon)
+                            HStack(spacing: 10) {
+                                Label("Ready", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                    .labelStyle(.titleAndIcon)
+                                Button("Remove…") { confirmRemove(m, detail: st.detail) }
+                            }
                         case "downloading":
                             HStack(spacing: 8) {
                                 ProgressView(value: st.progress)

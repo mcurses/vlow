@@ -99,6 +99,27 @@ def is_downloaded(model: LocalModel) -> bool:
     return local_path(model) is not None
 
 
+def _repo_cache_dir(model: LocalModel) -> Path:
+    return Path(hf_constants.HF_HUB_CACHE) / ("models--" + model.repo.replace("/", "--"))
+
+
+def remove(model: LocalModel) -> int:
+    """Delete the model from the Hugging Face cache (blobs, snapshots, refs —
+    the whole models--org--repo directory). Returns the bytes freed. Refuses
+    while that model is downloading."""
+    import shutil
+
+    active = _active
+    if active is not None and active["model"] == model.key:
+        raise RuntimeError(f"{model.display} is downloading — wait for it to finish.")
+    repo_dir = _repo_cache_dir(model)
+    if not repo_dir.exists():
+        return 0
+    freed = sum(p.stat().st_size for p in repo_dir.rglob("*") if p.is_file())
+    shutil.rmtree(repo_dir)
+    return freed
+
+
 def size_on_disk(model: LocalModel) -> int:
     path = local_path(model)
     if path is None:

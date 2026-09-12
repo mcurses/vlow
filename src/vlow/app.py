@@ -209,6 +209,15 @@ class VlowApp(rumps.App):
             if local_models.is_downloading():
                 return
             threading.Thread(target=self._download_model, args=(model,), daemon=True).start()
+        elif name.startswith("removeModel:"):
+            _, _, key = name.partition(":")
+            model = local_models.MODELS.get(key)
+            if model is None:
+                return
+            if self._state is not State.IDLE:
+                rumps.notification("vlow", "Model in use", "Finish the current recording first.")
+                return
+            threading.Thread(target=self._remove_model, args=(model,), daemon=True).start()
         elif name == "checkUpdates":
             self._check_updates(interactive=True)
 
@@ -356,6 +365,25 @@ class VlowApp(rumps.App):
             rumps.notification(
                 "vlow", f"{model.display} ready", "Select it under On-device model to use it."
             )
+
+    def _remove_model(self, model: local_models.LocalModel) -> None:
+        try:
+            freed = local_models.remove(model)
+        except Exception as e:
+            _log(f"{model.key} remove failed: {e}")
+            rumps.notification("vlow", f"Could not remove {model.display}", str(e))
+            return
+        _log(f"{model.key} removed ({freed / 1e9:.1f} GB freed)")
+        on_main_thread(lambda: set_model_status(local_models.status(model)))
+        if model.key == local_models.selected_key() and self._needs_model():
+            # The selected model is gone: drop readiness and let warmup run
+            # its missing-model path (icon, notification, Settings prompt).
+            self._ready = False
+            self._model_prompted = False
+            on_main_thread(lambda: self._set_status_icon("loading"))
+            self._warmup()
+        else:
+            rumps.notification("vlow", f"{model.display} removed", f"{freed / 1e9:.1f} GB freed.")
 
     def _needs_model(self) -> bool:
         return self._mode != "ptt" and backend_name() in ("mlx", "auto")

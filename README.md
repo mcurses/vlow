@@ -118,7 +118,7 @@ The current backend appears in the menubar dropdown header; switch it in
 Menubar icon → **Settings…** (or ⌘, while the menu is open) opens a
 System-Settings-style window (SwiftUI, `native/VlowSettings.swift`) for
 the hotkey, mode, an optional re-paste shortcut (off by default; click **Record Shortcut** and press the keys), backend, auto threshold, the on-device model (picker
-plus a download row per model with progress bar), AssemblyAI key and
+plus a download row per model with progress bar and a **Remove…** button once it is on disk), AssemblyAI key and
 language, the known-words list, and update checking. There is no Save button: every edit is written to
 `~/.config/vlow/config.toml` and applied live — the hotkey monitor is
 rebuilt, the backend re-warmed, known words are picked up by the next
