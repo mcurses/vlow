@@ -1,7 +1,18 @@
+import os
 import subprocess
 import time
 
-from AppKit import NSApplicationActivateIgnoringOtherApps, NSPasteboard, NSPasteboardItem, NSWorkspace
+import objc
+
+from AppKit import (
+    NSApplicationActivateIgnoringOtherApps,
+    NSPasteboard,
+    NSPasteboardItem,
+    NSWorkspace,
+    NSWorkspaceApplicationKey,
+    NSWorkspaceDidActivateApplicationNotification,
+)
+from Foundation import NSObject
 from Foundation import NSData
 from Quartz import (
     CGEventCreateKeyboardEvent,
@@ -105,6 +116,59 @@ def frontmost_app():
         return None
 
 
+def is_self(app) -> bool:
+    """True when `app` is this vlow process (alerts and the Settings window
+    make vlow the active app; it must never be a paste target)."""
+    try:
+        return app is not None and int(app.processIdentifier()) == os.getpid()
+    except Exception:
+        return False
+
+
+class _ActivationObserver(NSObject):
+    def initWithTracker_(self, tracker):
+        self = objc.super(_ActivationObserver, self).init()
+        if self is None:
+            return None
+        self._tracker = tracker
+        return self
+
+    def appActivated_(self, note) -> None:
+        try:
+            app = note.userInfo()[NSWorkspaceApplicationKey]
+        except Exception:
+            return
+        if not is_self(app):
+            self._tracker.last_other = app
+
+
+class FrontmostTracker:
+    """Remembers the most recent frontmost app that is not vlow, so a paste
+    target can be chosen even while vlow itself is active (alert just
+    dismissed, Settings window in front). Start on the main thread."""
+
+    def __init__(self) -> None:
+        self.last_other = None
+        self._observer = None
+
+    def start(self) -> None:
+        front = frontmost_app()
+        if not is_self(front):
+            self.last_other = front
+        self._observer = _ActivationObserver.alloc().initWithTracker_(self)
+        NSWorkspace.sharedWorkspace().notificationCenter().addObserver_selector_name_object_(
+            self._observer, "appActivated:", NSWorkspaceDidActivateApplicationNotification, None
+        )
+
+    def target(self):
+        """Where a transcription started now should be pasted: the frontmost
+        app, unless that is vlow — then the app active before it."""
+        front = frontmost_app()
+        if not is_self(front):
+            return front
+        return self.last_other
+
+
 def app_label(app) -> str:
     if app is None:
         return "none"
@@ -143,9 +207,10 @@ def paste_into(text: str, target, return_focus: bool = True) -> str:
     is gone or refuses to come forward. Blocking — run on a worker thread.
     Returns "direct" | "switched" | "fallback" for the log."""
     current = frontmost_app()
-    if target is None or target.isTerminated() or (
-        current is not None and current.processIdentifier() == target.processIdentifier()
-    ):
+    if target is None or target.isTerminated() or is_self(target):
+        paste(text)
+        return "direct"
+    if current is not None and current.processIdentifier() == target.processIdentifier():
         paste(text)
         return "direct"
     if not activate_and_wait(target):
@@ -153,6 +218,8 @@ def paste_into(text: str, target, return_focus: bool = True) -> str:
         return "fallback"
     time.sleep(ACTIVATE_SETTLE_SEC)
     paste(text)
-    if return_focus and current is not None:
+    # Hand focus back to where the user is — unless that is vlow itself
+    # (an alert or the Settings window), which has nothing to type into.
+    if return_focus and current is not None and not is_self(current):
         activate_and_wait(current)
     return "switched"

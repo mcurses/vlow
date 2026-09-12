@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import traceback
@@ -25,8 +26,11 @@ from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetecto
 from .overlay import Overlay
 from .resources import menubar_icon_dir
 from .paste import (
+    FrontmostTracker,
+    activate_and_wait,
     app_label,
     frontmost_app,
+    is_self,
     paste_into,
     POST_PASTE_WAIT_SEC,
     paste,
@@ -64,6 +68,18 @@ class State(Enum):
     STREAMING = "streaming"      # live AAI stream (hold gesture)
     TRANSCRIBING = "transcribing"  # batch finished, awaiting result
     FINALIZING = "finalizing"    # stream stopped, awaiting last finals
+
+
+def alert(*args, **kwargs):
+    """rumps.alert that hands focus back afterwards. The modal alert makes
+    vlow the active app and, having no windows of its own, vlow would stay
+    active — the user's next double-tap would then target vlow itself."""
+    prev = frontmost_app()
+    try:
+        return rumps.alert(*args, **kwargs)
+    finally:
+        if prev is not None and not is_self(prev):
+            threading.Thread(target=activate_and_wait, args=(prev,), daemon=True).start()
 
 
 def on_main_thread(fn):
@@ -116,6 +132,7 @@ class VlowApp(rumps.App):
         self._last_level_ts = 0.0  # throttles meter updates onto the main thread
         self._last_text = ""
         self._target_app = None  # frontmost app when the batch recording started
+        self._frontmost = FrontmostTracker()  # last non-vlow app, for when vlow itself is active
         self._replay = ReplayHotkey(lambda: self._last_text, self._config.get("repaste_hotkey", ""))
         self._ready = False
         self._model_prompted = False  # auto-open Settings for the download once per run
@@ -213,7 +230,7 @@ class VlowApp(rumps.App):
             self._update_busy = False
             self._set_update_status(msg)
             if interactive:
-                on_main_thread(lambda: rumps.alert("Check for Updates", msg))
+                on_main_thread(lambda: alert("Check for Updates", msg))
             return
         self._update_busy = False
         if not info["is_newer"]:
@@ -221,7 +238,7 @@ class VlowApp(rumps.App):
             self._set_update_status(f"You're up to date ({info['current']}).")
             if interactive:
                 on_main_thread(
-                    lambda: rumps.alert("You're up to date", f"vlow {info['current']} is the latest version.")
+                    lambda: alert("You're up to date", f"vlow {info['current']} is the latest version.")
                 )
             return
         _log(f"update available: {info['current']} → {info['latest']}")
@@ -244,7 +261,7 @@ class VlowApp(rumps.App):
                 "vlow pulls the latest commit, runs uv sync, rebuilds the app bundle and restarts."
             )
         else:
-            choice = rumps.alert(
+            choice = alert(
                 f"vlow {info['latest']} is available",
                 f"You have {info['current']}. This copy can't update itself, so grab the new "
                 "DMG from GitHub.",
@@ -256,7 +273,7 @@ class VlowApp(rumps.App):
 
                 _sp.run(["open", info["notes_url"]], check=False)
             return
-        choice = rumps.alert(
+        choice = alert(
             f"vlow {info['latest']} is available",
             f"You have {info['current']}. Install it now? {how}",
             ok="Install and Relaunch",
@@ -270,7 +287,7 @@ class VlowApp(rumps.App):
             return
         if self._state is not State.IDLE:
             on_main_thread(
-                lambda: rumps.alert("Update postponed", "Finish the current recording first, then check again.")
+                lambda: alert("Update postponed", "Finish the current recording first, then check again.")
             )
             return
         self._update_busy = True
@@ -285,7 +302,7 @@ class VlowApp(rumps.App):
             self._update_busy = False
             self._set_update_progress(None, f"Update failed: {msg}", visible=False)
             on_main_thread(lambda: self._set_status_icon("idle" if self._ready else "error"))
-            on_main_thread(lambda: rumps.alert("Update failed", msg))
+            on_main_thread(lambda: alert("Update failed", msg))
 
     def _set_update_progress(self, fraction: float | None, text: str, visible: bool = True) -> None:
         """Mirror install progress into Settings (bar + caption) and the
@@ -499,6 +516,10 @@ class VlowApp(rumps.App):
         self._watchdog.start()
         _log("watchdog started (ping 60s, heartbeat ~5min, `kill -USR1` dumps stacks)")
         try:
+            self._frontmost.start()
+        except Exception as e:
+            _log(f"frontmost tracker failed: {e}")
+        try:
             install_termination_hook(self.emergency_save)
         except Exception as e:
             _log(f"termination hook failed to install: {e}")
@@ -693,8 +714,10 @@ class VlowApp(rumps.App):
         self._to_state(State.RECORDING, "double-tap")
         # Remember where the text belongs: the user may wander off to another
         # app while the transcription runs (see _finish).
-        self._target_app = frontmost_app()
-        _log(f"target app: {app_label(self._target_app)}")
+        self._target_app = self._frontmost.target()
+        front = frontmost_app()
+        note = " (vlow itself is active — using the app before it)" if is_self(front) else ""
+        _log(f"target app: {app_label(self._target_app)}{note}")
         self._set_status_icon("recording")
         if self._overlay is not None:
             self._overlay.show_recording()

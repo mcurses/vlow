@@ -440,6 +440,10 @@ private struct SettingsView: View {
 public final class VlowSettings: NSObject {
     private static var window: NSWindow?
     private static let model = VlowSettingsModel()
+    /// The app that was in front before Settings took over; it gets focus
+    /// back when the window closes (vlow has no other windows, so macOS
+    /// would otherwise leave vlow active with nothing to type into).
+    private static var previousApp: NSRunningApplication?
 
     /// Show (or bring forward) the settings window. `json` is the current
     /// configuration; each change is delivered as JSON to
@@ -457,6 +461,10 @@ public final class VlowSettings: NSObject {
         model.onAction = { [weak target] name in
             _ = target?.perform(actionSel, with: name as NSString)
         }
+        if let front = NSWorkspace.shared.frontmostApplication,
+           front.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            previousApp = front
+        }
         if window == nil {
             let host = NSHostingController(rootView: SettingsView(model: model))
             let w = NSWindow(contentViewController: host)
@@ -468,6 +476,14 @@ public final class VlowSettings: NSObject {
             let screenH = NSScreen.main?.visibleFrame.height ?? 900
             w.setContentSize(NSSize(width: 520, height: min(860, screenH - 60)))
             w.center()
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification, object: w, queue: .main
+            ) { _ in
+                let me = ProcessInfo.processInfo.processIdentifier
+                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == me,
+                      let prev = previousApp, !prev.isTerminated else { return }
+                prev.activate(options: [.activateIgnoringOtherApps])
+            }
             window = w
         }
         NSApp.activate(ignoringOtherApps: true)
