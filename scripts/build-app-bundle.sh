@@ -86,7 +86,21 @@ else
 fi
 chmod +x "$APP/Contents/MacOS/vlow"
 cp "$PROJECT_DIR/.venv/pyvenv.cfg" "$APP/Contents/pyvenv.cfg"
-ln -sfn "$PROJECT_DIR/.venv/lib" "$APP/Contents/lib"
+
+# Contents/lib has to serve two masters: it points site-packages at the
+# real .venv, and for non-framework interpreters (uv's
+# python-build-standalone builds) it also has to hold libpython, which
+# the copied binary loads via @executable_path/../lib. So build it as a
+# real directory of symlinks rather than one symlink to .venv/lib.
+mkdir -p "$APP/Contents/lib"
+for entry in "$PROJECT_DIR/.venv/lib/"*; do
+  [ -e "$entry" ] || continue
+  ln -sfn "$entry" "$APP/Contents/lib/$(basename "$entry")"
+done
+for dylib in "$(dirname "$PYTHON_REAL")/../lib/"libpython*.dylib; do
+  [ -e "$dylib" ] || continue
+  ln -sfn "$(readlink -f "$dylib")" "$APP/Contents/lib/$(basename "$dylib")"
+done
 
 # Touch the bundle so LaunchServices re-registers it.
 touch "$APP"
