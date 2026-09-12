@@ -13,6 +13,7 @@ _DEFAULTS = {
     "hotkey": "fn",
     "mode": "toggle",  # "toggle" (double-tap) or "ptt" (hold-to-talk)
     "repaste_hotkey": "",  # global shortcut for Re-paste Last; empty = none
+    "paste_to_origin_app": True,  # batch: deliver text to the app that was frontmost at start
     "known_words": [],  # bias all backends toward these names/terms
 }
 

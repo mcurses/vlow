@@ -1,7 +1,7 @@
 import subprocess
 import time
 
-from AppKit import NSPasteboard, NSPasteboardItem
+from AppKit import NSApplicationActivateIgnoringOtherApps, NSPasteboard, NSPasteboardItem, NSWorkspace
 from Foundation import NSData
 from Quartz import (
     CGEventCreateKeyboardEvent,
@@ -89,3 +89,70 @@ def paste_no_restore(text: str) -> None:
     set_clipboard(text)
     time.sleep(0.05)
     synth_cmd_v()
+
+
+# How long an app may take to become frontmost after we activate it, and
+# how long to let it settle (become key) before the synthesized Cmd+V.
+ACTIVATE_TIMEOUT_SEC = 1.5
+ACTIVATE_SETTLE_SEC = 0.1
+
+
+def frontmost_app():
+    """The NSRunningApplication that owns the menu bar right now, or None."""
+    try:
+        return NSWorkspace.sharedWorkspace().frontmostApplication()
+    except Exception:
+        return None
+
+
+def app_label(app) -> str:
+    if app is None:
+        return "none"
+    try:
+        return f"{app.localizedName()} (pid {app.processIdentifier()})"
+    except Exception:
+        return "unknown app"
+
+
+def _is_frontmost(app) -> bool:
+    cur = frontmost_app()
+    return cur is not None and cur.processIdentifier() == app.processIdentifier()
+
+
+def activate_and_wait(app, timeout: float = ACTIVATE_TIMEOUT_SEC) -> bool:
+    """Bring `app` to the front and wait until macOS reports it frontmost.
+    Call from a worker thread: NSWorkspace only learns about the switch
+    while the main runloop is free to run."""
+    if app is None or app.isTerminated():
+        return False
+    if _is_frontmost(app):
+        return True
+    app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _is_frontmost(app):
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def paste_into(text: str, target, return_focus: bool = True) -> str:
+    """Paste `text` into `target` (an NSRunningApplication captured when the
+    recording started), then hand focus back to whatever the user is looking
+    at now. Falls back to a plain paste into the current app when the target
+    is gone or refuses to come forward. Blocking — run on a worker thread.
+    Returns "direct" | "switched" | "fallback" for the log."""
+    current = frontmost_app()
+    if target is None or target.isTerminated() or (
+        current is not None and current.processIdentifier() == target.processIdentifier()
+    ):
+        paste(text)
+        return "direct"
+    if not activate_and_wait(target):
+        paste(text)
+        return "fallback"
+    time.sleep(ACTIVATE_SETTLE_SEC)
+    paste(text)
+    if return_focus and current is not None:
+        activate_and_wait(current)
+    return "switched"

@@ -22,6 +22,7 @@ DEFAULTS: dict = {
     "hotkey": "fn",
     "mode": "toggle",
     "repaste_hotkey": "",  # pynput spec, e.g. "<ctrl>+<cmd>+v"; empty = off
+    "paste_to_origin_app": True,  # batch mode: paste into the app that was frontmost at start
     "backend": "mlx",
     "local_model": DEFAULT_MODEL,
     "auto_threshold_sec": DEFAULT_AUTO_THRESHOLD_SEC,
@@ -83,6 +84,9 @@ def normalize(data: dict) -> dict:
     out["mode"] = mode
 
     out["repaste_hotkey"] = validate_hotkey(str(data.get("repaste_hotkey") or ""))
+
+    raw = data.get("paste_to_origin_app", DEFAULTS["paste_to_origin_app"])
+    out["paste_to_origin_app"] = raw if isinstance(raw, bool) else str(raw).lower() in ("1", "true", "yes")
 
     backend = str(data.get("backend") or DEFAULTS["backend"]).lower()
     if backend not in VALID_BACKENDS:

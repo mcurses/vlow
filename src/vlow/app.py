@@ -25,6 +25,9 @@ from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetecto
 from .overlay import Overlay
 from .resources import menubar_icon_dir
 from .paste import (
+    app_label,
+    frontmost_app,
+    paste_into,
     POST_PASTE_WAIT_SEC,
     paste,
     paste_no_restore,
@@ -112,6 +115,7 @@ class VlowApp(rumps.App):
         self._overlay: Overlay | None = None
         self._last_level_ts = 0.0  # throttles meter updates onto the main thread
         self._last_text = ""
+        self._target_app = None  # frontmost app when the batch recording started
         self._replay = ReplayHotkey(lambda: self._last_text, self._config.get("repaste_hotkey", ""))
         self._ready = False
         self._model_prompted = False  # auto-open Settings for the download once per run
@@ -687,6 +691,10 @@ class VlowApp(rumps.App):
 
     def _start_recording(self) -> None:
         self._to_state(State.RECORDING, "double-tap")
+        # Remember where the text belongs: the user may wander off to another
+        # app while the transcription runs (see _finish).
+        self._target_app = frontmost_app()
+        _log(f"target app: {app_label(self._target_app)}")
         self._set_status_icon("recording")
         if self._overlay is not None:
             self._overlay.show_recording()
@@ -733,9 +741,28 @@ class VlowApp(rumps.App):
             self._overlay.hide()
         self._set_status_icon("idle")
         self._to_state(State.IDLE, f"transcription done, {len(text)} chars")
-        if text:
-            self._last_text = text
+        target, self._target_app = self._target_app, None
+        if not text:
+            return
+        self._last_text = text
+        if not self._config.get("paste_to_origin_app", True):
             paste(text)
+            return
+        # Off the main thread: activate_and_wait polls NSWorkspace, which only
+        # updates while the main runloop is free.
+        threading.Thread(target=self._deliver, args=(text, target), daemon=True).start()
+
+    def _deliver(self, text: str, target) -> None:
+        try:
+            how = paste_into(text, target)
+            if how != "direct":
+                _log(f"paste {how}: target {app_label(target)}")
+        except Exception as e:
+            _log(f"paste to target failed: {e!r}")
+            try:
+                paste(text)
+            except Exception as e2:
+                _log(f"paste failed: {e2!r}")
 
     def emergency_save(self) -> None:
         """SIGTERM while capturing: write whatever audio exists so far to

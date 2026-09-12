@@ -22,6 +22,7 @@ struct SettingsData: Codable, Equatable {
     var hotkey = "fn"
     var mode = "toggle"
     var repaste_hotkey = ""  // pynput spec ("<ctrl>+<cmd>+v"); empty = no shortcut
+    var paste_to_origin_app = true
     var backend = "mlx"
     var local_model = "whisper-large-v3"
     var auto_threshold_sec: Double = 60
@@ -238,6 +239,12 @@ private struct SettingsView: View {
                 } label: {
                     Text("Re-paste last")
                     Text("Pastes the most recent transcription again")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle(isOn: $model.data.paste_to_origin_app) {
+                    Text("Paste into the app I started in")
+                    Text("Double-tap recordings go back to the app that was in front when you started, then focus returns to where you are")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
