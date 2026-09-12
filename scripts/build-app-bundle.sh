@@ -15,6 +15,9 @@ if [ ! -x "$PYTHON" ]; then
   exit 1
 fi
 
+# Same version string as the release DMG, so the updater can compare.
+VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$PROJECT_DIR/pyproject.toml")"
+
 # The SwiftUI overlay module lives alongside the bundle in dist/.
 "$PROJECT_DIR/scripts/build-glass.sh"
 
@@ -45,9 +48,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.1</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>0.1.1</string>
+    <string>$VERSION</string>
     <key>LSUIElement</key>
     <true/>
     <key>LSMinimumSystemVersion</key>

@@ -133,10 +133,15 @@ behind your back (`src/vlow/local_models.py`).
 Menubar icon → **Check for Updates…** asks the GitHub Releases API for
 the latest tag (`src/vlow/updater.py`). A daily background check does the
 same unless you turn it off in Settings → Updates. When a newer version
-exists, the downloaded app offers *Install and Relaunch*: it fetches the
-DMG, mounts it, swaps `vlow.app` in place (old copy kept until the new one
-is in position) and relaunches. Source checkouts are just pointed at the
-Releases page.
+exists, *Install and Relaunch* does the whole thing with a progress bar in
+Settings → Updates (and a percentage in the menubar item):
+
+- **Downloaded app:** fetches the DMG, mounts it, swaps `vlow.app` in
+  place (old copy kept until the new one is in position) and relaunches.
+- **Source checkout** (`uv run vlow` or the launchd bundle from
+  `vlow install`): `git pull --ff-only`, `uv sync`, rebuilds
+  `dist/vlow.app` and restarts through launchd (or re-execs). Refuses to
+  run on a dirty working tree or a detached HEAD.
 
 On first launch vlow creates `config.toml` from whatever is in effect
 (`.env` / environment) with one example known word, `vlow`.

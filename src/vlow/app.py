@@ -33,7 +33,7 @@ from .paste import (
 )
 from .recordings import LATEST_PATH as RECORDING_PATH, reveal_in_finder, save_float32
 from .replay import ReplayHotkey
-from .settings_window import open_settings, set_model_status, set_update_status
+from .settings_window import open_settings, set_model_status, set_update_progress, set_update_status
 from .stream_aai import StreamingSession
 from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
 
@@ -228,20 +228,21 @@ class VlowApp(rumps.App):
         on_main_thread(lambda: self._offer_update(info))
 
     def _offer_update(self, info: dict) -> None:
-        if updater.can_self_update():
-            choice = rumps.alert(
-                f"vlow {info['latest']} is available",
-                f"You have {info['current']}. Install it now? vlow downloads the update, "
-                "replaces itself and relaunches. macOS will ask for Accessibility again.",
-                ok="Install and Relaunch",
-                cancel="Later",
+        kind = updater.install_kind()
+        if kind == "bundle":
+            how = (
+                "vlow downloads the update, replaces itself and relaunches. "
+                "macOS will ask for Accessibility again."
             )
-            if choice == 1:
-                threading.Thread(target=self._install_update, args=(info,), daemon=True).start()
+        elif kind == "source":
+            how = (
+                f"This copy runs from the source checkout at {updater.source_checkout()}: "
+                "vlow pulls the latest commit, runs uv sync, rebuilds the app bundle and restarts."
+            )
         else:
             choice = rumps.alert(
                 f"vlow {info['latest']} is available",
-                f"You have {info['current']}. This copy runs from source, so grab the new "
+                f"You have {info['current']}. This copy can't update itself, so grab the new "
                 "DMG from GitHub.",
                 ok="Open Releases",
                 cancel="Later",
@@ -250,31 +251,57 @@ class VlowApp(rumps.App):
                 import subprocess as _sp
 
                 _sp.run(["open", info["notes_url"]], check=False)
+            return
+        choice = rumps.alert(
+            f"vlow {info['latest']} is available",
+            f"You have {info['current']}. Install it now? {how}",
+            ok="Install and Relaunch",
+            cancel="Later",
+        )
+        if choice == 1:
+            threading.Thread(target=self._install_update, args=(info,), daemon=True).start()
 
     def _install_update(self, info: dict) -> None:
         if self._update_busy:
             return
+        if self._state is not State.IDLE:
+            on_main_thread(
+                lambda: rumps.alert("Update postponed", "Finish the current recording first, then check again.")
+            )
+            return
         self._update_busy = True
         on_main_thread(lambda: self._set_status_icon("busy"))
-        rumps.notification("vlow", f"Downloading {info['latest']}…", "vlow relaunches when it's done.")
+        rumps.notification("vlow", f"Updating to {info['latest']}…", "vlow relaunches when it's done.")
+        self._set_update_progress(None, "Starting…")
         try:
-            updater.install(info["url"], on_progress=lambda frac, text: self._set_update_status(text))
+            updater.install_update(info, on_progress=self._set_update_progress)
         except updater.UpdateError as e:
             msg = str(e)
             _log(f"update failed: {msg}")
             self._update_busy = False
-            self._set_update_status(f"Update failed: {msg}")
+            self._set_update_progress(None, f"Update failed: {msg}", visible=False)
             on_main_thread(lambda: self._set_status_icon("idle" if self._ready else "error"))
             on_main_thread(lambda: rumps.alert("Update failed", msg))
 
-    def _set_update_status(self, text: str) -> None:
+    def _set_update_progress(self, fraction: float | None, text: str, visible: bool = True) -> None:
+        """Mirror install progress into Settings (bar + caption) and the
+        menubar item, so it is visible even with the window closed."""
         def push() -> None:
+            if visible:
+                pct = f" {fraction:.0%}" if fraction is not None and fraction < 1 else ""
+                self._update_item.title = f"Updating…{pct}"
+            else:
+                self._update_item.title = "Check for Updates…"
             try:
                 set_update_status(text)
+                set_update_progress(fraction, visible)
             except Exception:
                 pass  # window never opened / dylib missing — status is only cosmetic
 
         on_main_thread(push)
+
+    def _set_update_status(self, text: str) -> None:
+        self._set_update_progress(None, text, visible=False)
 
     def _auto_update_loop(self) -> None:
         """Daily background check, opt-out via Settings → Updates."""

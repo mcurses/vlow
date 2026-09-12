@@ -12,6 +12,13 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def repo_root() -> Path | None:
+    """The source checkout this module runs from, or None inside the
+    self-contained release bundle (where the package lives in site-packages
+    and there is no repository to pull)."""
+    return _REPO_ROOT if (_REPO_ROOT / ".git").exists() else None
+
+
 def bundle_contents() -> Path | None:
     """Return ``vlow.app/Contents`` when running from a release bundle."""
     exe = Path(sys.executable).resolve()

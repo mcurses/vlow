@@ -78,3 +78,8 @@ def update_settings(data: dict) -> None:
 def set_update_status(text: str) -> None:
     """Caption under the Updates row ("Checking…", "You're up to date", …)."""
     _cls().setUpdateStatus_(text)
+
+
+def set_update_progress(fraction: float | None, visible: bool = True) -> None:
+    """Progress bar under the Updates row; fraction None → indeterminate."""
+    _cls().setUpdateProgress_(json.dumps({"visible": visible, "fraction": fraction}))

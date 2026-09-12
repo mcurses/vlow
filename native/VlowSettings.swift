@@ -41,6 +41,11 @@ struct ModelStatus: Codable, Equatable {
     var detail = ""
 }
 
+struct UpdateProgress: Codable, Equatable {
+    var visible = false
+    var fraction: Double? = nil  // nil while visible → indeterminate bar
+}
+
 struct KnownWord: Identifiable, Equatable {
     let id = UUID()
     var text: String
@@ -52,6 +57,7 @@ public final class VlowSettingsModel: NSObject, ObservableObject {
     @Published var words: [KnownWord] = []
     @Published var modelStatus: [String: ModelStatus] = [:]  // by model key
     @Published var updateStatus = ""
+    @Published var updateProgress = UpdateProgress()
     var onChange: ((String) -> Void)?
     var onAction: ((String) -> Void)?
 
@@ -378,17 +384,32 @@ private struct SettingsView: View {
             Section {
                 LabeledContent {
                     Button("Check Now") { model.onAction?("checkUpdates") }
+                        .disabled(model.updateProgress.visible)
                 } label: {
                     Text("Version \(model.data.app_version)")
                     if !model.updateStatus.isEmpty {
                         Text(model.updateStatus).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if model.updateProgress.visible {
+                    HStack(spacing: 8) {
+                        if let f = model.updateProgress.fraction {
+                            ProgressView(value: f)
+                            Text(f.formatted(.percent.precision(.fractionLength(0))))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 40, alignment: .trailing)
+                        } else {
+                            ProgressView()
+                                .progressViewStyle(.linear)
+                        }
+                    }
+                }
                 Toggle("Check for updates automatically", isOn: $model.data.check_updates)
             } header: {
                 Text("Updates")
             } footer: {
-                Text("Updates come from the vlow GitHub releases. Installing one replaces the app and relaunches it; macOS will ask for Accessibility again afterwards.")
+                Text("Updates come from the vlow GitHub releases. Installing one downloads it, replaces the app and relaunches it. The downloaded app is ad-hoc signed, so macOS asks for Accessibility again afterwards; a source checkout pulls, syncs and rebuilds instead.")
             }
 
             Section {
@@ -450,6 +471,16 @@ public final class VlowSettings: NSObject {
     @objc(setUpdateStatus:)
     public static func setUpdateStatus(_ text: String) {
         model.updateStatus = text
+    }
+
+    /// Progress bar under the Updates row: {"visible": bool, "fraction": 0…1 | null}.
+    @MainActor
+    @objc(setUpdateProgress:)
+    public static func setUpdateProgress(_ json: String) {
+        guard let raw = json.data(using: .utf8),
+              let parsed = try? JSONDecoder().decode(UpdateProgress.self, from: raw)
+        else { return }
+        model.updateProgress = parsed
     }
 
     /// Update one on-device model row: {"model","state","progress","detail"}.

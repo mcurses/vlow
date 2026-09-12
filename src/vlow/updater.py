@@ -1,17 +1,25 @@
 """Check GitHub Releases for a newer vlow and install it in place.
 
-Only the self-contained release bundle (scripts/build-release.sh) can update
-itself; a source checkout or the thin launchd bundle just gets pointed at
-the Releases page. Installing = download the DMG, mount it, swap the .app
-directory next to the running one, relaunch. The app is ad-hoc signed, so
-macOS treats the new build as a new app: Accessibility has to be granted
-again after an update (a Developer ID signature would avoid that).
+Two install paths, picked by how vlow is running:
+
+* Release bundle (scripts/build-release.sh): download the DMG, mount it,
+  swap the .app directory next to the running one, relaunch. The app is
+  ad-hoc signed, so macOS treats the new build as a new app: Accessibility
+  has to be granted again after an update (a Developer ID signature would
+  avoid that).
+* Source checkout (``uv run vlow`` or the thin launchd bundle from
+  scripts/build-app-bundle.sh): ``git pull --ff-only``, ``uv sync``,
+  rebuild the thin bundle and restart through launchd (or re-exec).
+
+Progress callbacks receive ``(fraction, text)``; ``fraction`` is None for
+steps without a measurable length (git, uv, the bundle build).
 """
 
 import json
 import os
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -21,7 +29,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
-from .resources import bundle_contents
+from .resources import bundle_contents, repo_root
 
 REPO = "mcurses/vlow"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
@@ -43,7 +51,28 @@ def app_path() -> Path | None:
 
 
 def can_self_update() -> bool:
+    """True for the self-contained release bundle (DMG swap)."""
     return app_path() is not None
+
+
+def source_checkout() -> Path | None:
+    """The git checkout to pull when running from source, else None."""
+    if can_self_update():
+        return None
+    return repo_root()
+
+
+def can_update() -> bool:
+    return can_self_update() or source_checkout() is not None
+
+
+def install_kind() -> str:
+    """"bundle" | "source" | "none" — which install() path applies."""
+    if can_self_update():
+        return "bundle"
+    if source_checkout() is not None:
+        return "source"
+    return "none"
 
 
 def current_version() -> str:
@@ -108,9 +137,23 @@ def check(timeout: float = 10.0) -> dict:
     }
 
 
+Progress = Callable[[float | None, str], None]
+
+
+def install_update(info: dict, on_progress: Progress = lambda frac, text: None, relaunch: bool = True) -> None:
+    """Install whichever way fits this copy of vlow (see module docstring)."""
+    kind = install_kind()
+    if kind == "bundle":
+        install(info["url"], on_progress=on_progress, relaunch=relaunch)
+    elif kind == "source":
+        install_source(on_progress=on_progress, relaunch=relaunch)
+    else:
+        raise UpdateError("This copy of vlow cannot update itself.")
+
+
 def install(
     url: str,
-    on_progress: Callable[[float, str], None] = lambda frac, text: None,
+    on_progress: Progress = lambda frac, text: None,
     target: Path | None = None,
     relaunch: bool = True,
 ) -> Path:
@@ -158,7 +201,7 @@ def install(
     return target
 
 
-def _download(url: str, dest: Path, on_progress: Callable[[float, str], None]) -> None:
+def _download(url: str, dest: Path, on_progress: Progress) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp, open(dest, "wb") as out:
@@ -182,10 +225,116 @@ def _download(url: str, dest: Path, on_progress: Callable[[float, str], None]) -
         raise UpdateError(f"Download failed: {e}") from e
 
 
-def _run(cmd: list[str]) -> None:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+def install_source(
+    repo: Path | None = None,
+    on_progress: Progress = lambda frac, text: None,
+    relaunch: bool = True,
+    uv: str | None = None,
+) -> Path:
+    """Update a source checkout: fast-forward pull, ``uv sync``, rebuild the
+    thin launchd bundle if one is in use, then restart. Blocking — run on a
+    worker thread. Returns the repo path."""
+    repo = repo or source_checkout()
+    if repo is None:
+        raise UpdateError("Not running from a source checkout.")
+    git = ["git", "-C", str(repo)]
+
+    on_progress(None, "Checking the working tree…")
+    dirty = _run(git + ["status", "--porcelain", "--untracked-files=no"]).strip()
+    if dirty:
+        raise UpdateError(
+            f"{repo} has uncommitted changes — commit or stash them, then update again."
+        )
+    branch = _run(git + ["rev-parse", "--abbrev-ref", "HEAD"]).strip()
+    if branch == "HEAD":
+        raise UpdateError(f"{repo} is on a detached HEAD — check out a branch first.")
+
+    on_progress(None, f"Pulling {branch}…")
+    before = _run(git + ["rev-parse", "HEAD"]).strip()
+    _run(git + ["pull", "--ff-only", "--quiet"], env=_git_env())
+    after = _run(git + ["rev-parse", "HEAD"]).strip()
+
+    uv = uv or _find_uv()
+    on_progress(None, "Syncing dependencies (uv sync)…")
+    _run([uv, "sync", "--frozen"], cwd=repo, env=_git_env())
+
+    thin_bundle = repo / "dist" / "vlow.app"
+    if thin_bundle.is_dir():
+        on_progress(None, "Rebuilding the app bundle…")
+        _run([str(repo / "scripts" / "build-app-bundle.sh")], cwd=repo, env=_git_env())
+
+    on_progress(1.0, "Restarting…" if before != after else "Restarting (already at the latest commit)…")
+    if relaunch:
+        _relaunch_source(repo, thin_bundle if thin_bundle.is_dir() else None)
+    return repo
+
+
+def _find_uv() -> str:
+    for candidate in (
+        shutil.which("uv"),
+        Path.home() / ".local" / "bin" / "uv",
+        Path("/opt/homebrew/bin/uv"),
+        Path("/usr/local/bin/uv"),
+    ):
+        if candidate and Path(candidate).is_file():
+            return str(candidate)
+    raise UpdateError("uv not found — install it from https://docs.astral.sh/uv/")
+
+
+def _git_env() -> dict:
+    """launchd gives us a minimal PATH; make sure git/ssh/uv helpers resolve
+    and nothing waits on a terminal prompt."""
+    env = dict(os.environ)
+    extra = ["/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin"), "/usr/bin", "/bin"]
+    env["PATH"] = ":".join(extra + [p for p in env.get("PATH", "").split(":") if p and p not in extra])
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    return env
+
+
+def _run(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> str:
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, env=env, stdin=subprocess.DEVNULL)
     if proc.returncode != 0:
-        raise UpdateError(f"{cmd[0]} failed: {proc.stderr.strip() or proc.stdout.strip()}")
+        name = Path(cmd[0]).name
+        raise UpdateError(f"{name} failed: {proc.stderr.strip() or proc.stdout.strip()}")
+    return proc.stdout
+
+
+def _launchd_service() -> str | None:
+    """'gui/<uid>/com.vlow' when the LaunchAgent is loaded, else None."""
+    service = f"gui/{os.getuid()}/com.vlow"
+    proc = subprocess.run(["launchctl", "print", service], capture_output=True, text=True)
+    return service if proc.returncode == 0 else None
+
+
+def _relaunch_source(repo: Path, thin_bundle: Path | None) -> None:
+    """Restart the source install: via launchd when the agent is loaded
+    (same executable path, so Accessibility survives), otherwise re-exec
+    the current command line once this process has exited."""
+    service = _launchd_service()
+    if service is not None:
+        # kickstart -k kills us and starts the new build; run it detached so
+        # the kill doesn't take the launcher shell down with it.
+        subprocess.Popen(
+            ["launchctl", "kickstart", "-k", service],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+    if thin_bundle is not None:
+        _relaunch(thin_bundle)
+        return
+    cmd = " ".join(shlex.quote(a) for a in [sys.executable, *sys.argv])
+    subprocess.Popen(
+        ["/bin/sh", "-c", f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.2; done; cd {shlex.quote(str(repo))} && {cmd}"],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    from AppKit import NSApplication
+
+    NSApplication.sharedApplication().terminate_(None)
 
 
 def _relaunch(target: Path) -> None:
