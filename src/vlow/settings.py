@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 
+from . import login_item
 from .config import CONFIG_PATH, TOML_TO_ENV, load as load_config
 from .hotkey import HOTKEYS
 from .local_models import DEFAULT_MODEL, MODELS
@@ -55,6 +56,9 @@ def current() -> dict:
         out[key] = value
     out = normalize(out)
     out["config_path"] = str(CONFIG_PATH)
+    # Not a config.toml key: the LaunchAgent on disk is the source of truth,
+    # so the toggle always shows what macOS will actually do at next login.
+    out["start_at_login"] = login_item.enabled()
     # The window renders the model picker and download rows from this list,
     # so Python stays the single source of truth for names and sizes.
     out["local_models"] = [

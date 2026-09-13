@@ -19,7 +19,7 @@ from Foundation import NSOperationQueue
 
 from .audio import Recorder, default_input_name, list_input_devices, refresh_devices
 from . import settings as settings_mod
-from . import local_models, updater
+from . import local_models, login_item, updater
 from .config import load as load_config
 from .diag import Watchdog, install_termination_hook
 from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetector
@@ -396,6 +396,15 @@ class VlowApp(rumps.App):
         except ValueError as e:
             _log(f"settings rejected: {e}")
             return
+        # Not part of config.toml — the LaunchAgent on disk holds this one.
+        want_login = bool(data.get("start_at_login", False))
+        if want_login != login_item.enabled():
+            try:
+                login_item.set_enabled(want_login)
+                _log(f"start at login: {'on' if want_login else 'off'}")
+            except Exception as e:
+                _log(f"start at login change failed: {e}")
+
         settings_mod.save(new)
         settings_mod.apply_env(new)
         self._config = load_config()
@@ -554,6 +563,13 @@ class VlowApp(rumps.App):
             install_termination_hook(self.emergency_save)
         except Exception as e:
             _log(f"termination hook failed to install: {e}")
+        try:
+            # Keep the login agent pointing at this copy of vlow — otherwise
+            # moving from a checkout to /Applications leaves it launching a
+            # path that no longer exists.
+            login_item.refresh()
+        except Exception as e:
+            _log(f"login item refresh failed: {e}")
         threading.Thread(target=self._auto_update_loop, daemon=True).start()
 
     def _probe_main(self) -> str:

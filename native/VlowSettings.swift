@@ -32,6 +32,7 @@ struct SettingsData: Codable, Equatable {
     var aai_language = ""
     var known_words: [String] = []
     var check_updates = true
+    var start_at_login = false
     var config_path = ""
     var app_version = ""
     var local_models: [LocalModelInfo] = []  // read-only, from local_models.py
@@ -454,6 +455,19 @@ private struct SettingsView: View {
                 Text("Updates")
             } footer: {
                 Text("Updates come from the vlow GitHub releases. Installing one downloads it, replaces the app and relaunches it. The downloaded app is ad-hoc signed, so macOS asks for Accessibility again afterwards; a source checkout pulls, syncs and rebuilds instead.")
+            }
+
+            Section {
+                Toggle(isOn: $model.data.start_at_login) {
+                    Text("Start vlow at login")
+                    Text("Also restarts vlow if it ever crashes, and keeps the logs in ~/Library/Logs/vlow")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Startup")
+            } footer: {
+                Text("Takes effect at your next login. Quitting vlow from the menubar still quits it for the rest of the session.")
             }
 
             Section {

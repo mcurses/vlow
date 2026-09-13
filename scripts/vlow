@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vlow — control the vlow LaunchAgent from the terminal.
+# vlow — control a source checkout's LaunchAgent from the terminal.
 #
 # Usage: vlow <command>
 #   restart   force-restart the running instance (picks up new code)
@@ -7,10 +7,12 @@
 #   start     start vlow if not running
 #   status    launchd state + last log lines
 #   logs      tail the error log (Ctrl-C to stop)
-#   install   (re)build the app bundle and (re)install the LaunchAgent
+#   install   (re)build dist/vlow.app, enable start-at-login, run it now
+#   uninstall disable start-at-login and stop the agent
 #
-# '--restart' style also accepted. Installed by install-launchagent.sh
-# as a symlink in /opt/homebrew/bin.
+# Everyday use needs none of this: "Start vlow at login" in Settings writes
+# the same LaunchAgent (src/vlow/login_item.py is the one place that does).
+# This script is for a checkout you are developing against.
 
 set -euo pipefail
 
@@ -19,6 +21,12 @@ PROJECT_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
 SERVICE="gui/$(id -u)/com.vlow"
 PLIST="$HOME/Library/LaunchAgents/com.vlow.plist"
 LOG_DIR="$HOME/Library/Logs/vlow"
+
+# One plist writer for both the Settings toggle and this script.
+autostart() {
+  "$PROJECT_DIR/.venv/bin/python" -c \
+    "from vlow import login_item; login_item.set_enabled($1)"
+}
 
 cmd="${1:-help}"
 cmd="${cmd#--}"
@@ -50,9 +58,28 @@ case "$cmd" in
     exec tail -F "$LOG_DIR/vlow.err"
     ;;
   install)
-    exec "$PROJECT_DIR/scripts/install-launchagent.sh"
+    # The bundle exists so Privacy & Security says "vlow", not "python3.12".
+    "$PROJECT_DIR/scripts/build-app-bundle.sh"
+    autostart True
+    echo "Wrote $PLIST"
+    launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+    launchctl enable "$SERVICE"
+    launchctl kickstart -k "$SERVICE"
+    BIN_DIR="/opt/homebrew/bin"
+    if [ -d "$BIN_DIR" ] && [ -w "$BIN_DIR" ]; then
+      ln -sfn "$SELF" "$BIN_DIR/vlow"
+      echo "Installed CLI: $BIN_DIR/vlow"
+    fi
+    echo "Loaded — vlow is running and will start at login. Logs: $LOG_DIR"
+    ;;
+  uninstall)
+    launchctl bootout "$SERVICE" 2>/dev/null || true
+    autostart False
+    echo "Removed $PLIST — vlow no longer starts at login."
+    echo "Logs in $LOG_DIR are kept; delete them by hand if you want."
     ;;
   help|*)
-    sed -n '2,12p' "$SELF" | sed 's/^# \{0,1\}//'
+    sed -n '2,15p' "$SELF" | sed 's/^# \{0,1\}//'
     ;;
 esac
