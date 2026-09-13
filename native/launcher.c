@@ -49,17 +49,16 @@ int main(int argc, char **argv) {
     st = PyConfig_SetBytesString(&cfg, &cfg.program_name, real);
     if (PyStatus_Exception(st)) goto fail;
 
-    // LaunchServices passes no args (older releases passed -psn_…).
-    int inject = argc < 2 || strncmp(argv[1], "-psn_", 5) == 0;
-    int nargs = inject ? 3 : argc;
+    // Always run `-m vlow`, forwarding whatever else we were given, so the
+    // bundle executable doubles as the CLI (`vlow transcribe file.m4a`).
+    // LaunchServices passes no args of its own (older releases passed -psn_…).
+    int skip = (argc >= 2 && strncmp(argv[1], "-psn_", 5) == 0) ? 2 : 1;
+    int nargs = 3 + (argc - skip);
     char **args = calloc((size_t)nargs, sizeof *args);
     args[0] = argv[0];
-    if (inject) {
-        args[1] = "-m";
-        args[2] = "vlow";
-    } else {
-        for (int i = 1; i < argc; i++) args[i] = argv[i];
-    }
+    args[1] = "-m";
+    args[2] = "vlow";
+    for (int i = skip; i < argc; i++) args[3 + i - skip] = argv[i];
     st = PyConfig_SetBytesArgv(&cfg, nargs, args);
     if (PyStatus_Exception(st)) goto fail;
 

@@ -1,3 +1,6 @@
+import subprocess
+from pathlib import Path
+
 import numpy as np
 import sounddevice as sd
 
@@ -102,3 +105,31 @@ class Recorder:
         if not self._chunks:
             return np.zeros(0, dtype=np.float32)
         return np.concatenate(self._chunks).flatten().astype(np.float32)
+
+
+def load_file(path: str | Path) -> np.ndarray:
+    """Decode an audio file to the same 16 kHz mono float32 the Recorder
+    produces, so every backend can take it unchanged.
+
+    ffmpeg does the decoding, which is what makes `vlow transcribe` accept
+    anything from .wav to .m4a to the audio track of a video file.
+    """
+    src = Path(path).expanduser()
+    if not src.exists():
+        raise FileNotFoundError(f"no such file: {src}")
+    cmd = [
+        "ffmpeg", "-nostdin", "-threads", "0", "-i", str(src),
+        "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le",
+        "-ar", str(SAMPLE_RATE), "-",
+    ]
+    try:
+        out = subprocess.run(cmd, capture_output=True, check=True).stdout
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "ffmpeg not found — install it with 'brew install ffmpeg'"
+        ) from e
+    except subprocess.CalledProcessError as e:
+        tail = e.stderr.decode(errors="replace").strip().splitlines()[-1:]
+        raise RuntimeError(f"ffmpeg failed on {src.name}: {' '.join(tail)}") from e
+    # s16le → float32 in [-1, 1], the range the models expect.
+    return np.frombuffer(out, dtype=np.int16).astype(np.float32) / 32768.0
