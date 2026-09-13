@@ -266,7 +266,7 @@ def download(model: LocalModel, on_status: StatusCallback) -> None:
     xet_was_disabled = hf_constants.HF_HUB_DISABLE_XET
     hf_constants.HF_HUB_DISABLE_XET = True
     # The LaunchAgent pins HF_HUB_OFFLINE=1 so warmup never blocks on a hub
-    # round-trip that hangs forever under launchd (install-launchagent.sh).
+    # round-trip that hangs forever under launchd (see login_item.py).
     # A deliberate download is the one moment we do want the network, so lift
     # it for the duration: the module constant for code that already imported
     # huggingface_hub, the env vars for anything importing it mid-download.
