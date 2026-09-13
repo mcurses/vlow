@@ -2,6 +2,8 @@
   <img src="assets/icon-1024.png" width="128" alt="">
   <h1>vlow</h1>
   <p><strong>Voice dictation for macOS that runs on your Mac.</strong></p>
+  <br>
+  <img src="assets/overlay.png" width="257" alt="vlow's recording overlay: a glass pill showing a live waveform">
 </div>
 
 Double-tap a modifier key, talk, double-tap again — the text is pasted into
