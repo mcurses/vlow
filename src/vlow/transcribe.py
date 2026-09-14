@@ -28,8 +28,13 @@ def auto_threshold_sec() -> float:
         ) from e
 
 
-def _backend_for_audio(audio: np.ndarray) -> str:
-    """Pick the concrete backend for a specific buffer; honors auto mode."""
+def resolve_backend(audio: np.ndarray) -> str:
+    """Pick the concrete backend for a specific buffer; honors auto mode.
+
+    Public because the transcription queue routes on it: "mlx" work has to be
+    serialized (single-threaded on-device inference) while "assemblyai" work
+    is just HTTP and can run in parallel.
+    """
     name = backend_name()
     if name != "auto":
         return name
@@ -59,7 +64,7 @@ def warmup() -> None:
 
 
 def transcribe(audio: np.ndarray) -> str:
-    chosen = _backend_for_audio(audio)
+    chosen = resolve_backend(audio)
     duration = audio.size / SAMPLE_RATE
     if chosen == "mlx":
         from .local_models import selected_key

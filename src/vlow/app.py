@@ -20,6 +20,7 @@ from Foundation import NSOperationQueue
 from .audio import Recorder, default_input_name, list_input_devices, refresh_devices
 from . import settings as settings_mod
 from . import local_models, login_item, updater
+from .jobs import TranscriptionQueue
 from .config import load as load_config
 from .diag import Watchdog, install_termination_hook
 from .hotkey import EVENT_STATS, DoubleTapDetector, HoldDetector, TapHoldDetector
@@ -38,7 +39,13 @@ from .paste import (
     restore_clipboard,
     snapshot_clipboard,
 )
-from .recordings import LATEST_PATH as RECORDING_PATH, reveal_in_finder, save_float32, save_int16_bytes
+from .recordings import (
+    LATEST_PATH as RECORDING_PATH,
+    reveal_in_finder,
+    save_float32,
+    save_int16_bytes,
+    sweep_pending as recordings_sweep,
+)
 from .replay import ReplayHotkey
 from .settings_window import open_settings, set_model_status, set_update_progress, set_update_status
 from .stream_aai import StreamingSession
@@ -66,8 +73,9 @@ class State(Enum):
     IDLE = "idle"
     RECORDING = "recording"      # batch mic capture (toggle gesture)
     STREAMING = "streaming"      # live AAI stream (hold gesture)
-    TRANSCRIBING = "transcribing"  # batch finished, awaiting result
     FINALIZING = "finalizing"    # stream stopped, awaiting last finals
+    # Batch transcription has no state here: it runs in TranscriptionQueue,
+    # concurrently with whatever the mic is doing next.
 
 
 def alert(*args, **kwargs):
@@ -138,6 +146,17 @@ class VlowApp(rumps.App):
         self._model_prompted = False  # auto-open Settings for the download once per run
         self._update_busy = False
         self._update_offered: str | None = None  # version already shown by the auto-check
+        # Batch transcriptions run here, so stopping a recording never blocks
+        # the hotkey. Callbacks land on worker threads; _on_queue_change hops
+        # to the main thread itself.
+        self._queue = TranscriptionQueue(
+            deliver=self._deliver_job,
+            on_change=self._on_queue_change,
+            log=_log,
+        )
+        n = recordings_sweep()
+        if n:
+            _log(f"dropped {n} stale queued recording(s) from a previous run")
 
         self._hotkey = self._make_detector(self._mode, self._config["hotkey"])
 
@@ -214,7 +233,7 @@ class VlowApp(rumps.App):
             model = local_models.MODELS.get(key)
             if model is None:
                 return
-            if self._state is not State.IDLE:
+            if self._state is not State.IDLE or self._queue.is_busy():
                 rumps.notification("vlow", "Model in use", "Finish the current recording first.")
                 return
             threading.Thread(target=self._remove_model, args=(model,), daemon=True).start()
@@ -617,7 +636,7 @@ class VlowApp(rumps.App):
                 warmup()
             _log(f"warmup done in {time.time()-t0:.1f}s — hotkey is live")
             self._ready = True
-            on_main_thread(lambda: self._set_status_icon("idle"))
+            on_main_thread(self._refresh_status_icon)
             hotkey_label = self._config["hotkey"].replace("_", " ").title()
             if self._mode == "ptt":
                 rumps.notification(
@@ -663,11 +682,13 @@ class VlowApp(rumps.App):
             rumps.notification("vlow", "", "Model still loading…")
             return
         if self._state == State.IDLE:
+            # Queued transcriptions no longer block a new recording; they keep
+            # running while this one captures.
             self._start_recording()
         elif self._state == State.RECORDING:
             self._stop_and_transcribe()
         else:
-            # ignore taps while transcribing or streaming
+            # streaming owns the mic exclusively
             _log(f"double-tap ignored (state={self._state.value})")
 
     def _start_stream(self) -> None:
@@ -721,8 +742,8 @@ class VlowApp(rumps.App):
     def _after_stream(self) -> None:
         if self._overlay is not None:
             self._overlay.hide()
-        self._set_status_icon("idle")
         self._to_state(State.IDLE, "stream finished")
+        self._refresh_status_icon()  # a queued batch job may still be running
         self._restore_preserved_clipboard()
 
     def _restore_preserved_clipboard(self) -> None:
@@ -785,49 +806,64 @@ class VlowApp(rumps.App):
             self._reset()
 
     def _stop_and_transcribe(self) -> None:
-        self._to_state(State.TRANSCRIBING, "double-tap stop")
-        self._set_status_icon("busy")
+        """Hand the recording to the queue and go straight back to idle, so
+        the next double-tap can start recording immediately."""
+        target, self._target_app = self._target_app, None
+        self._to_state(State.IDLE, "double-tap stop → queued")
         if self._overlay is not None:
-            self._overlay.show_busy()
+            self._overlay.hide()  # the pill goes; the job's blob takes over
         # recorder.stop() blocks ~110ms in PortAudio stream teardown — off
         # the main thread, or the overlay's transition drops frames.
-        threading.Thread(target=self._do_transcribe, daemon=True).start()
+        threading.Thread(
+            target=self._enqueue, args=(self._recorder, target), daemon=True
+        ).start()
+        self._recorder = Recorder()  # the queue owns the old one's buffer now
 
-    def _do_transcribe(self) -> None:
-        text = ""
+    def _enqueue(self, recorder, target) -> None:
         try:
-            audio = self._recorder.stop()
-            # Persist the raw audio before transcribing so a crash in
-            # MLX / AAI never loses the recording.
-            try:
-                save_float32(audio)
-            except Exception as e:
-                print(f"save raw recording failed: {e}", flush=True)
-            text = transcribe(audio)
+            audio = recorder.stop()
         except Exception as e:
-            # stdout is a file under launchd (block-buffered): flush, or the
-            # error sits in the buffer while the log shows "0 chars".
-            _log(f"transcribe error: {e!r}")
+            _log(f"recorder stop failed: {e!r}")
             traceback.print_exc()
             sys.stderr.flush()
-        on_main_thread(lambda: self._finish(text))
-
-    def _finish(self, text: str) -> None:
-        if self._overlay is not None:
-            self._overlay.hide()
-        self._set_status_icon("idle")
-        self._to_state(State.IDLE, f"transcription done, {len(text)} chars")
-        target, self._target_app = self._target_app, None
-        if not text:
             return
-        self._last_text = text
+        if audio.size == 0:
+            _log("nothing captured — not queueing")
+            on_main_thread(self._refresh_status_icon)
+            return
         if not self._config.get("paste_to_origin_app", True):
-            paste(text)
+            target = None  # paste wherever focus is when the text is ready
+        self._queue.submit(audio, target)
+
+    def _on_queue_change(self) -> None:
+        """Queue depth changed (any thread) — refresh the blobs and the icon."""
+        ids = self._queue.pending_ids()
+        def push() -> None:
+            if self._overlay is not None:
+                self._overlay.set_jobs(ids)
+            self._refresh_status_icon()
+        on_main_thread(push)
+
+    def _refresh_status_icon(self) -> None:
+        """One place that decides the menubar icon, now that recording and
+        transcribing can be true at the same time."""
+        if not self._ready:
+            self._set_status_icon("loading")
+        elif self._state in (State.RECORDING, State.STREAMING):
+            self._set_status_icon("recording")
+        elif self._state is State.FINALIZING or self._queue.is_busy():
+            self._set_status_icon("busy")
+        else:
+            self._set_status_icon("idle")
+
+    def _deliver_job(self, job) -> None:
+        """Paste one finished job (delivery thread, already in order)."""
+        self._last_text = job.text
+        if job.target is None:
+            paste(job.text)
             return
-        # Off the main thread: activate_and_wait polls NSWorkspace, which only
-        # updates while the main runloop is free.
         return_focus = bool(self._config.get("return_focus_after_paste", True))
-        threading.Thread(target=self._deliver, args=(text, target, return_focus), daemon=True).start()
+        self._deliver(job.text, job.target, return_focus)
 
     def _deliver(self, text: str, target, return_focus: bool) -> None:
         try:
@@ -844,8 +880,12 @@ class VlowApp(rumps.App):
     def emergency_save(self) -> None:
         """SIGTERM while capturing: write whatever audio exists so far to
         last_recording.wav. Runs on the termination thread, touches no UI.
-        Transcribing/finalizing states already saved before they started."""
+        Queued jobs already have their own file under recordings.PENDING_DIR,
+        written the moment they were enqueued."""
         state = self._state
+        queued = self._queue.depth()
+        if queued:
+            _log(f"emergency save: {queued} queued recording(s) already on disk")
         if state is State.RECORDING:
             audio = self._recorder.snapshot()
             path = save_float32(audio)
@@ -859,7 +899,7 @@ class VlowApp(rumps.App):
 
     def _reset(self) -> None:
         if self._overlay is not None:
-            self._overlay.hide()
-        self._set_status_icon("idle")
+            self._overlay.hide()  # blobs for still-queued jobs stay up
         self._to_state(State.IDLE, "reset")
+        self._refresh_status_icon()
         self._restore_preserved_clipboard()

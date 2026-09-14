@@ -11,6 +11,18 @@ import SwiftUI
 
 private let barCount = 28
 private let pillSize = CGSize(width: 200, height: 52)
+// Queued transcriptions bud out of the pill's left edge as glass circles.
+// blobGap is small enough that GlassEffectContainer merges neighbours into
+// one liquid shape and lets them separate again as they resolve.
+private let blobSize = 40.0
+private let blobGap = 10.0
+// How far apart shapes still fuse into one liquid body. Larger than the
+// layout gap on purpose: that is what grows the metaball neck between
+// neighbouring blobs and between the newest blob and the pill.
+private let blobMergeSpacing = 34.0
+private let blobBars = 5
+// Slack around the pill for the materialize wobble.
+private let pillMargin = CGSize(width: 32, height: 16)
 // Rate at which Python pushes mic levels (one bar shift each); mirrors
 // LEVEL_PUSH_INTERVAL_SEC in vlow/app.py so the outgoing snapshot keeps
 // scrolling at the same speed as the live bars.
@@ -23,6 +35,17 @@ public final class VlowGlassModel: NSObject, ObservableObject {
     var previousMode: String = "hidden"
     var modeChangedAt: TimeInterval = 0
     var levels: [Double] = Array(repeating: 0, count: barCount)
+    /// One entry per in-flight transcription, oldest first. The pill sits to
+    /// the right of them, so a new job buds off the pill and pushes the
+    /// older ones further left.
+    @Published var jobs: [String] = []
+
+    @objc public func setJobs(_ ids: [String]) {
+        guard ids != jobs else { return }
+        withAnimation(.spring(response: 0.46, dampingFraction: 0.72)) {
+            self.jobs = ids
+        }
+    }
 
     @objc public func setMode(_ mode: String) {
         previousMode = self.mode
@@ -104,21 +127,92 @@ private struct BarsView: View {
     }
 }
 
+/// One queued transcription: a glass circle with a miniature version of the
+/// pill's busy wave running inside it. Each blob is phase-offset by its id so
+/// a row of them ripples instead of pulsing in lockstep.
+private struct BlobView: View {
+    let id: String
+
+    private var phaseOffset: Double {
+        // Stable per-job offset; abs() because hashValue can be negative.
+        Double(abs(id.hashValue) % 1000) / 1000.0 * 2 * .pi
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 40.0)) { context in
+            Canvas { g, size in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let phase = 7.0 * t + phaseOffset
+                let gap = 2.5
+                let barW = (size.width - gap * Double(blobBars - 1)) / Double(blobBars)
+                g.addFilter(.shadow(color: .black.opacity(0.7), radius: 3, y: 0.5))
+                for i in 0..<blobBars {
+                    let level = 0.34 + 0.30 * sin(phase + Double(i) * 0.72)
+                    // Round the row off to the circle so the outer bars stay
+                    // inside the glass edge.
+                    let f = (Double(i) - Double(blobBars - 1) / 2) / (Double(blobBars) / 2)
+                    let envelope = sqrt(max(0, 1 - f * f * 0.82))
+                    let h = max(barW, level * size.height * envelope)
+                    let c = Double(i) / Double(blobBars - 1)
+                    let color = Color(
+                        red: 0.48 + (0.12 - 0.48) * c,
+                        green: 0.30 + (0.78 - 0.30) * c,
+                        blue: 0.98
+                    )
+                    let rect = CGRect(
+                        x: Double(i) * (barW + gap),
+                        y: (size.height - h) / 2,
+                        width: barW,
+                        height: h
+                    )
+                    g.fill(Path(roundedRect: rect, cornerRadius: barW / 2), with: .color(color))
+                }
+            }
+        }
+        .frame(width: blobSize * 0.52, height: blobSize * 0.46)
+        .frame(width: blobSize, height: blobSize)
+    }
+}
+
 private struct PillView: View {
     @ObservedObject var model: VlowGlassModel
 
+    /// Ties the blobs and the pill into one morphing glass system, so a new
+    /// blob separates out of the pill rather than fading in on top of it.
+    @Namespace private var glassNS
+
     var body: some View {
-        GlassEffectContainer {
-            ZStack {
+        GlassEffectContainer(spacing: blobMergeSpacing) {
+            HStack(spacing: blobGap) {
+                ForEach(model.jobs, id: \.self) { id in
+                    BlobView(id: id)
+                        .glassEffect(.clear, in: .circle)
+                        .glassEffectID(id, in: glassNS)
+                        .glassEffectTransition(.matchedGeometry)
+                }
                 if model.mode != "hidden" {
                     BarsView(model: model)
                         .frame(width: pillSize.width, height: pillSize.height)
                         .glassEffect(.clear, in: .capsule)
+                        .glassEffectID("pill", in: glassNS)
                         .glassEffectTransition(.materialize)
                 }
             }
         }
-        .frame(width: pillSize.width + 32, height: pillSize.height + 16)
+        // Trailing: the pill keeps its place on screen while blobs grow to
+        // the left (overlay.py pins the panel's right edge to match).
+        .frame(
+            width: PillView.width(jobCount: model.jobs.count, pillVisible: model.mode != "hidden"),
+            height: pillSize.height + pillMargin.height,
+            alignment: .trailing
+        )
+    }
+
+    /// The pill only claims width while it is on screen, so a panel holding
+    /// nothing but blobs has no dead area hanging off its left.
+    static func width(jobCount: Int, pillVisible: Bool) -> Double {
+        let pill = pillVisible ? pillSize.width : 0
+        return pill + pillMargin.width + Double(jobCount) * (blobSize + blobGap)
     }
 }
 
@@ -147,8 +241,16 @@ public final class VlowGlass: NSObject {
         let host = DraggableHostingView(rootView: PillView(model: model))
         host.frame = NSRect(
             x: 0, y: 0,
-            width: pillSize.width + 32, height: pillSize.height + 16
+            width: PillView.width(jobCount: 0, pillVisible: true),
+            height: pillSize.height + pillMargin.height
         )
         return host
+    }
+
+    /// Panel width for a given number of in-flight jobs. Swift owns the
+    /// geometry; overlay.py asks rather than duplicating the arithmetic.
+    @objc(viewWidthForJobCount:pillVisible:)
+    public static func viewWidth(forJobCount n: Int, pillVisible: Bool) -> Double {
+        PillView.width(jobCount: n, pillVisible: pillVisible)
     }
 }

@@ -14,7 +14,12 @@ import numpy as np
 
 SAMPLE_RATE = 16000
 
-LATEST_PATH = Path.home() / "Library" / "Application Support" / "vlow" / "last_recording.wav"
+_DIR = Path.home() / "Library" / "Application Support" / "vlow"
+LATEST_PATH = _DIR / "last_recording.wav"
+# One file per queued-but-not-yet-delivered recording. last_recording.wav only
+# ever holds the newest, so without these a crash with three jobs in flight
+# would lose the two older ones.
+PENDING_DIR = _DIR / "pending"
 
 
 def _ensure_dir() -> None:
@@ -56,3 +61,37 @@ def reveal_in_finder() -> bool:
         return False
     subprocess.run(["open", "-R", str(LATEST_PATH)], check=False)
     return True
+
+
+def save_pending(seq: int, audio: np.ndarray) -> Path | None:
+    """Keep a queued recording on disk until its text has been delivered."""
+    if audio is None or audio.size == 0:
+        return None
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    path = PENDING_DIR / f"{seq:06d}.wav"
+    pcm16 = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    tmp = path.with_suffix(".wav.tmp")
+    with wave.open(str(tmp), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SAMPLE_RATE)
+        w.writeframes(pcm16)
+    os.replace(tmp, path)
+    return path
+
+
+def discard_pending(path: Path | None) -> None:
+    if path is not None:
+        path.unlink(missing_ok=True)
+
+
+def sweep_pending() -> int:
+    """Drop leftovers from a previous run (delivered text, killed process).
+    Returns how many files were removed."""
+    if not PENDING_DIR.exists():
+        return 0
+    n = 0
+    for f in PENDING_DIR.glob("*.wav"):
+        f.unlink(missing_ok=True)
+        n += 1
+    return n
