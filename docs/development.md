@@ -87,6 +87,7 @@ src/vlow/
 ├── app.py             rumps.App, state machine, menubar items, permission prompt
 ├── audio.py           sounddevice InputStream → numpy float32 16 kHz mono; file decoding
 ├── transcribe.py      backend dispatcher (VLOW_BACKEND, VLOW_LOCAL_MODEL)
+├── jobs.py            queue of in-flight transcriptions, per-app paste ordering
 ├── transcribe_mlx.py  local Whisper large-v3 via mlx-whisper
 ├── transcribe_parakeet.py  local Parakeet TDT 0.6B v3 via parakeet-mlx
 ├── known_words_fix.py fuzzy post-correction toward known words (Parakeet)
@@ -96,7 +97,7 @@ src/vlow/
 ├── overlay.py         borderless non-activating NSPanel hosting the SwiftUI glass pill
 ├── paste.py           pbcopy + synthesized Cmd+V via CGEvent
 ├── replay.py          pynput global shortcut → re-paste last text
-├── recordings.py      the always-on-disk last_recording.wav
+├── recordings.py      the always-on-disk last_recording.wav + pending/ queue files
 ├── resources.py       finds icons / dylib / .env in both the checkout and the .app
 ├── config.py          config.toml + .env loading, env mirroring
 ├── settings.py        settings schema, validation, TOML writer, first-run seeding

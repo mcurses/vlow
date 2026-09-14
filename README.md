@@ -33,6 +33,11 @@ record, transcribe, one clean paste. *Hold* the same key and you get live
 streaming instead, with each finalized turn pasted as it arrives. One key,
 two fundamentally different paths, no mode to remember.
 
+**You never wait to talk again.** Stop a recording and it goes into a queue
+instead of locking the hotkey — start the next one immediately. Each pending
+transcription is a glass blob budding out of the recording pill, and text
+lands in the order you spoke it, per app.
+
 **MLX under the hood.** Roughly 2× faster than the whisper.cpp everyone else
 builds on, and Parakeet runs at ~25× realtime — a minute of speech
 transcribed in about two seconds, entirely offline.

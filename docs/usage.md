@@ -13,7 +13,7 @@ default; Right Option, Left Option and Right Command are the alternatives.
 
 | Gesture | Action |
 |---|---|
-| Hotkey × 2 (within 350 ms) | Start recording. Double-tap again to stop, transcribe and paste once. |
+| Hotkey × 2 (within 350 ms) | Start recording. Double-tap again to stop; the recording is queued, transcribed and pasted once. |
 | Hold the hotkey | Live AssemblyAI streaming. Finalized turns paste into the focused app as they arrive. Release to stop. |
 | Re-paste shortcut | Paste the last transcript again. Off until you set one in Settings. |
 
@@ -21,6 +21,22 @@ The hold gesture needs an AssemblyAI API key; without one, only the
 double-tap works (the startup notification says so). If you never want it,
 turn off **Hold to stream live** — the hotkey then only reacts to
 double-taps.
+
+### Recording while something is still transcribing
+
+You don't have to wait for a transcription to come back. Stopping a
+recording only queues it, so the next double-tap starts recording straight
+away. The overlay shows one glass blob per queued transcription, budding out
+of the left of the recording pill; each blob dissolves when its text lands.
+
+Transcriptions of long recordings routed to AssemblyAI run in parallel, while
+on-device ones run one at a time (MLX inference is single-threaded).
+
+**Text always arrives in the order you spoke it — per app.** A transcription
+waits for older ones headed to the *same* app, but never for one going
+somewhere else. So a quick note dictated into Slack is not held up by the
+five-minute recording still uploading for Notes, while two recordings for
+Slack always paste in the order you made them.
 
 ### `ptt` — hold-only
 
@@ -53,7 +69,7 @@ shows the current state while you record.
 
 If the hotkey misfires, the dropdown has reliable fallbacks:
 
-- **Stop & Transcribe** — same as the second double-tap
+- **Stop & Transcribe** — same as the second double-tap (queues the recording)
 - **Discard Recording** — drop the buffer, no paste
 - **Re-paste Last** — works even without a re-paste shortcut configured
 - **Reveal Last Recording** — opens the raw audio in Finder
@@ -110,9 +126,12 @@ restart, `kill`, logout, an update relaunch), a SIGTERM/SIGINT/SIGHUP hook
 writes whatever was captured up to that moment before the process exits.
 SIGKILL cannot be intercepted.
 
-Only the latest session is kept — each recording overwrites the previous
-file, written atomically, so it is always either the old valid recording or
-the new complete one.
+That file only ever holds the newest recording — each one overwrites the
+last, written atomically, so it is always either the old valid recording or
+the new complete one. Because a queue can hold several recordings at once,
+each queued one *also* gets its own file in
+`~/Library/Application Support/vlow/pending/`, kept until its text has been
+pasted, so a crash with three jobs in flight can't lose the older two.
 
 ```bash
 # Reveal it (or use the menubar item)
