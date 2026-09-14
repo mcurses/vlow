@@ -704,8 +704,8 @@ class VlowApp(rumps.App):
         # don't flicker it back-and-forth between finalized turns.
         self._preserved_clipboard = snapshot_clipboard()
         self._set_status_icon("recording")
-        if self._overlay is not None:
-            self._overlay.show_recording()
+        # Pending transcriptions move out into blobs: the pill is the mic now.
+        self._sync_overlay()
         self._stream = StreamingSession(
             on_final=self._on_stream_final,
             on_level=self._on_level,
@@ -740,9 +740,8 @@ class VlowApp(rumps.App):
         on_main_thread(self._after_stream)
 
     def _after_stream(self) -> None:
-        if self._overlay is not None:
-            self._overlay.hide()
         self._to_state(State.IDLE, "stream finished")
+        self._sync_overlay()
         self._refresh_status_icon()  # a queued batch job may still be running
         self._restore_preserved_clipboard()
 
@@ -793,8 +792,8 @@ class VlowApp(rumps.App):
         note = " (vlow itself is active — using the app before it)" if is_self(front) else ""
         _log(f"target app: {app_label(self._target_app)}{note}")
         self._set_status_icon("recording")
-        if self._overlay is not None:
-            self._overlay.show_recording()
+        # Pending transcriptions move out into blobs: the pill is the mic now.
+        self._sync_overlay()
         # Re-create the Recorder each session so device selection (and any
         # newly-attached BT mic) takes effect.
         self._recorder = Recorder(device=self._input_device, on_level=self._on_level)
@@ -811,7 +810,10 @@ class VlowApp(rumps.App):
         target, self._target_app = self._target_app, None
         self._to_state(State.IDLE, "double-tap stop → queued")
         if self._overlay is not None:
-            self._overlay.hide()  # the pill goes; the job's blob takes over
+            # Morph straight to the transcribing wave. The job reaches the
+            # queue ~110ms later on the worker thread; going through _sync
+            # here would hide the pill and re-show it, which flickers.
+            self._overlay.show_busy()
         # recorder.stop() blocks ~110ms in PortAudio stream teardown — off
         # the main thread, or the overlay's transition drops frames.
         threading.Thread(
@@ -829,20 +831,41 @@ class VlowApp(rumps.App):
             return
         if audio.size == 0:
             _log("nothing captured — not queueing")
-            on_main_thread(self._refresh_status_icon)
+            on_main_thread(lambda: (self._sync_overlay(), self._refresh_status_icon()))
             return
         if not self._config.get("paste_to_origin_app", True):
             target = None  # paste wherever focus is when the text is ready
         self._queue.submit(audio, target)
 
     def _on_queue_change(self) -> None:
-        """Queue depth changed (any thread) — refresh the blobs and the icon."""
-        ids = self._queue.pending_ids()
+        """Queue depth changed (any thread) — resync the overlay and icon."""
         def push() -> None:
-            if self._overlay is not None:
-                self._overlay.set_jobs(ids)
+            self._sync_overlay()
             self._refresh_status_icon()
         on_main_thread(push)
+
+    def _sync_overlay(self) -> None:
+        """The pill always shows *the current thing*: live audio while
+        recording, otherwise the newest transcription still running. Only the
+        older pending ones bud off to its left as blobs — so a single
+        recording transcribes in the pill exactly as it always did, and a
+        second one is what pushes the first out into a blob."""
+        if self._overlay is None:
+            return
+        ids = self._queue.pending_ids()  # oldest first
+        if self._state in (State.RECORDING, State.STREAMING):
+            # The pill is showing live audio, so every job needs its own blob.
+            self._overlay.set_jobs(ids)
+            self._overlay.show_recording()
+        elif self._state is State.FINALIZING:
+            self._overlay.set_jobs(ids)
+            self._overlay.show_busy()
+        elif ids:
+            self._overlay.set_jobs(ids[:-1])  # newest one is the pill
+            self._overlay.show_busy()
+        else:
+            self._overlay.set_jobs([])
+            self._overlay.hide()
 
     def _refresh_status_icon(self) -> None:
         """One place that decides the menubar icon, now that recording and
@@ -898,8 +921,7 @@ class VlowApp(rumps.App):
             _log(f"emergency save: nothing in flight (state={state.value})")
 
     def _reset(self) -> None:
-        if self._overlay is not None:
-            self._overlay.hide()  # blobs for still-queued jobs stay up
         self._to_state(State.IDLE, "reset")
+        self._sync_overlay()  # queued jobs keep their pill/blobs
         self._refresh_status_icon()
         self._restore_preserved_clipboard()

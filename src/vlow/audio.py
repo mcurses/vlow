@@ -1,4 +1,5 @@
 import subprocess
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -6,16 +7,25 @@ import sounddevice as sd
 
 SAMPLE_RATE = 16000
 
+# PortAudio's init/teardown is process-global, and sd._terminate() invalidates
+# every open stream. Since the transcription queue lets a new recording start
+# while the previous recorder is still closing on another thread, those two
+# must never overlap — re-initializing underneath a closing stream is a
+# use-after-free, not just an error. Everything that touches the global state
+# or a stream handle takes this lock.
+_pa_lock = threading.RLock()
+
 
 def refresh_devices() -> None:
     """Re-init PortAudio so newly-attached devices (e.g. just-connected
     Bluetooth headsets) show up. sounddevice's device list is otherwise
     a snapshot taken at first import."""
-    try:
-        sd._terminate()
-        sd._initialize()
-    except Exception as e:
-        print(f"[audio] refresh failed: {e}", flush=True)
+    with _pa_lock:
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception as e:
+            print(f"[audio] refresh failed: {e}", flush=True)
 
 
 def list_input_devices() -> list[dict]:
@@ -66,16 +76,19 @@ class Recorder:
 
     def start(self) -> None:
         # Re-scan first so the BT mic that connected after launch is usable.
-        refresh_devices()
-        self._chunks = []
-        self._stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=1,
-            dtype="float32",
-            callback=self._cb,
-            device=self._device,
-        )
-        self._stream.start()
+        # Held across the open: a concurrent stop() must finish closing before
+        # refresh_devices() can terminate PortAudio.
+        with _pa_lock:
+            refresh_devices()
+            self._chunks = []
+            self._stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                callback=self._cb,
+                device=self._device,
+            )
+            self._stream.start()
 
     def _cb(self, indata, frames, time_info, status) -> None:
         self._chunks.append(indata.copy())
@@ -97,11 +110,12 @@ class Recorder:
     def stop(self) -> np.ndarray:
         if self._stream is None:
             return np.zeros(0, dtype=np.float32)
-        try:
-            self._stream.stop()
-            self._stream.close()
-        finally:
-            self._stream = None
+        with _pa_lock:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            finally:
+                self._stream = None
         if not self._chunks:
             return np.zeros(0, dtype=np.float32)
         return np.concatenate(self._chunks).flatten().astype(np.float32)

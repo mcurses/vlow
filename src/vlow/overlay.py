@@ -116,20 +116,24 @@ class Overlay:
 
     def show_recording(self) -> None:
         """Materialize the pill with live amplitude bars."""
-        self._hide_seq += 1  # cancel any pending order-out
-        self._peak = 0.04
-        self._mode = "record"
-        self._resize()  # make room before the pill materializes into it
-        self._panel.orderFront_(None)
-        self._model.setMode_("record")
+        self._to_mode("record")
 
     def show_busy(self) -> None:
         """Morph to the transcribing wave."""
-        self._hide_seq += 1
-        self._mode = "busy"
-        self._resize()
+        self._to_mode("busy")
+
+    def _to_mode(self, mode: str) -> None:
+        """Idempotent: the app re-syncs the whole overlay on every change, so
+        re-asserting the current mode must not restart its animation."""
+        self._hide_seq += 1  # cancel any pending order-out
+        if mode == self._mode:
+            return
+        if mode == "record":
+            self._peak = 0.04
+        self._mode = mode
+        self._resize()  # make room before the pill materializes into it
         self._panel.orderFront_(None)
-        self._model.setMode_("busy")
+        self._model.setMode_(mode)
 
     def set_jobs(self, ids: list[str]) -> None:
         """Show one glass blob per in-flight transcription, oldest first.
@@ -189,10 +193,11 @@ class Overlay:
     def hide(self) -> None:
         """Dematerialize the pill. Blobs for still-queued transcriptions stay
         up; the panel only leaves once nothing at all is left to show."""
-        self._mode = "hidden"
-        self._model.setMode_("hidden")  # plays the dematerialize transition
-        # Reclaim the pill's width only once it has finished dissolving.
-        self._after(_HIDE_DELAY_SEC, self._resize)
+        if self._mode != "hidden":
+            self._mode = "hidden"
+            self._model.setMode_("hidden")  # plays the dematerialize transition
+            # Reclaim the pill's width only once it has finished dissolving.
+            self._after(_HIDE_DELAY_SEC, self._resize)
         self._maybe_order_out()
 
     def _maybe_order_out(self) -> None:
