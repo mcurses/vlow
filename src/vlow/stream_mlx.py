@@ -51,9 +51,35 @@ CONTEXT_SIZE = (256, 256)
 # of building the cache is paid while the user is still drawing breath rather
 # than swallowing their first word.
 PRIMER_SAMPLES = 1600
-# How much of the already-pasted tail to match against a revised draft when
-# lining the two up.
-_ANCHOR_CHARS = 40
+# How many trailing words of the already-pasted text to match a revised draft
+# against, longest first.
+_ANCHOR_WORDS = 6
+# Consecutive chunks that fail to line up before we give up and resync.
+_STALL_LIMIT = 4
+
+
+def _normalize(text: str) -> tuple[str, list[int]]:
+    """Lowercase alphanumerics and single spaces, plus a map back to the
+    original indices.
+
+    Anchors have to be matched in this space because the decoder re-cases and
+    re-punctuates as context grows — "Was" becomes "was" once it turns out to
+    be mid-sentence, "gibt's" loses its apostrophe — and a literal match then
+    fails on text that is really the same words.
+    """
+    out: list[str] = []
+    idx: list[int] = []
+    gap = True
+    for i, ch in enumerate(text):
+        if ch.isalnum():
+            out.append(ch.lower())
+            idx.append(i)
+            gap = False
+        elif not gap:
+            out.append(" ")
+            idx.append(i)
+            gap = True
+    return "".join(out), idx
 
 
 def _common_prefix(a: str, b: str) -> str:
@@ -84,6 +110,7 @@ class StreamingSession:
         self._lock = threading.Lock()
         self._committed = ""  # everything handed to on_final so far
         self._drafts: list[str] = []
+        self._stalled = 0  # consecutive chunks we could not line up
         self._final_text = ""
         self._stream: Optional[sd.InputStream] = None
         self._future = None
@@ -158,20 +185,62 @@ class StreamingSession:
         plain slice. But the decoder revises earlier words as context grows
         ("Spracherkennung" → "Spracherkung"), which shifts every offset after
         them — slicing by length then lands mid-word, which is how "Der Text"
-        once became "Der Text ext". So when the prefix no longer matches, line
-        the two up on the tail of what we pasted instead. Returns None when
-        they cannot be lined up at all, in which case we commit nothing this
-        round and wait for the drafts to settle: pasting is irreversible, so
-        emitting nothing is always safer than emitting a duplicate.
+        once became "Der Text ext".
+
+        So when the prefix stops matching, line the two up on the *words* at
+        the end of what we pasted, trying progressively shorter anchors. A
+        fixed-length character anchor is not enough: if the decoder rewrites
+        anything inside it, the match fails, and because the pasted text never
+        changes it would fail identically on every later chunk — the stream
+        would paste beautifully for a while and then stop for good.
+
+        Returns None when even one word cannot be lined up; the caller counts
+        those and resyncs rather than stalling forever.
         """
         pasted = self._committed
         if not pasted:
             return candidate
         if candidate.startswith(pasted):
             return candidate[len(pasted):]
-        anchor = pasted[-_ANCHOR_CHARS:]
-        i = candidate.rfind(anchor)
-        return None if i < 0 else candidate[i + len(anchor):]
+        norm_cand, idx = _normalize(candidate)
+        words = pasted.split()
+        for n in range(min(_ANCHOR_WORDS, len(words)), 0, -1):
+            anchor, _ = _normalize(" ".join(words[-n:]))
+            if not anchor:
+                continue
+            at = norm_cand.rfind(anchor)
+            if at >= 0:
+                end = at + len(anchor)
+                return candidate[idx[end - 1] + 1:] if end <= len(idx) else ""
+        return None
+
+    def _resync(self, candidate: str) -> str:
+        """Give up on aligning and continue from the current draft tip.
+
+        Only reached if the decoder rewrote the tail beyond recognition. We
+        cannot un-paste what is already in the document, so the choice is
+        between losing the few unalignable words and repeating them; losing
+        them keeps the text readable, and forward progress resumes either way.
+
+        Never resync backwards. `candidate` here is an agreed prefix, which
+        can be shorter than what we pasted — or empty, when consecutive drafts
+        disagree from the first word. Adopting that would mark pasted text as
+        unpasted and emit it a second time.
+        """
+        if len(candidate) <= len(self._committed):
+            return ""
+        print(
+            f"[stream_mlx] lost alignment after {len(self._committed)} chars — "
+            "resyncing to the current draft",
+            flush=True,
+        )
+        # Emit from the common prefix rather than adopting the draft wholesale.
+        # Dropping it would lose everything said since alignment broke; this
+        # can at worst repeat a word or two, which is the kinder failure.
+        tail = candidate[len(_common_prefix(self._committed, candidate)):]
+        self._committed = candidate
+        self._stalled = 0
+        return tail.strip()
 
     def _advance(self, draft: str) -> None:
         """Commit whatever the last AGREE_CHUNKS decodes agree on."""
@@ -181,18 +250,35 @@ class StreamingSession:
         stable = self._drafts[-1]
         for older in self._drafts[-AGREE_CHUNKS:-1]:
             stable = _common_prefix(stable, older)
+
+        emit: list[str] = []
         with self._lock:
-            tail = self._tail_after(stable)
-            cut = tail.rfind(" ") if tail else -1  # whole words only
-            if cut <= 0:
-                self._emit_partial(draft)
-                return
-            text = tail[:cut]
-            # Grow by exactly what we hand out, so _committed stays a faithful
-            # record of what is in the user's document.
-            self._committed += text
-        if text.strip():
-            self._on_final(text.strip())
+            # Judge alignment against the live draft, never against `stable`:
+            # an empty agreed prefix only means the last few decodes disagree,
+            # which is ordinary and transient. Treating that as lost alignment
+            # resynced mid-sentence and swallowed everything still unpasted.
+            if self._tail_after(draft) is None:
+                self._stalled += 1
+                if self._stalled >= _STALL_LIMIT:
+                    recovered = self._resync(draft)
+                    if recovered:
+                        emit.append(recovered)
+            else:
+                self._stalled = 0
+
+            tail = self._tail_after(stable) if stable else None
+            if tail is not None:
+                cut = tail.rfind(" ")  # whole words only
+                if cut > 0:
+                    # Grow by exactly what we hand out, so _committed stays a
+                    # faithful record of what is in the user's document.
+                    self._committed += tail[:cut]
+                    if tail[:cut].strip():
+                        emit.append(tail[:cut].strip())
+
+        # Outside the lock: a slow paste must not block the decoder.
+        for text in emit:
+            self._on_final(text)
         self._emit_partial(draft)
 
     def _emit_partial(self, draft: str) -> None:
@@ -203,7 +289,12 @@ class StreamingSession:
     def _finish(self, draft: str) -> None:
         """Release stopped the mic: everything still uncommitted is final."""
         with self._lock:
-            tail = self._tail_after(draft) or ""
+            tail = self._tail_after(draft)
+            if tail is None:
+                # Releasing the key is the last chance to deliver this text,
+                # so fall back to whatever follows the common prefix rather
+                # than dropping the rest of what the user said.
+                tail = draft[len(_common_prefix(self._committed, draft)):]
             self._committed += tail
             final = self._committed
         self._final_text = final
