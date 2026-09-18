@@ -34,6 +34,14 @@ SAMPLE_RATE = 16000
 # 0.5 s per decode. Shorter chunks commit sooner but cost a decode each; this
 # lands around 300 ms of work per chunk, comfortably realtime.
 CHUNK_SAMPLES = 8000
+# Mic blocksize is deliberately *not* CHUNK_SAMPLES. The level meter is driven
+# from the audio callback and the overlay advances one bar per push, so tying
+# the callback to the decode size made the waveform crawl at 2 fps. Let
+# PortAudio pick its natural (small) block, exactly as the batch Recorder
+# does, and accumulate up to CHUNK_SAMPLES here before handing the decoder a
+# chunk. 256 frames is 16 ms — comfortably above the ~29 pushes/s the overlay
+# wants, without the ~1000 callbacks/s PortAudio's own default produced here.
+MIC_BLOCKSIZE = 256
 # How many successive decodes must agree before a prefix is pasted. Three is
 # the smallest value that never retracted on real dictation — see module docs.
 AGREE_CHUNKS = 3
@@ -70,6 +78,8 @@ class StreamingSession:
         self._on_level = on_level
         self._device = device  # None → system default at start()
         self._queue: "queue.Queue[Optional[np.ndarray]]" = queue.Queue()
+        self._pending: list[np.ndarray] = []  # mic blocks not yet a full chunk
+        self._pending_len = 0
         self._raw_chunks: list[bytes] = []
         self._lock = threading.Lock()
         self._committed = ""  # everything handed to on_final so far
@@ -95,7 +105,7 @@ class StreamingSession:
             samplerate=SAMPLE_RATE,
             channels=1,
             dtype="float32",
-            blocksize=CHUNK_SAMPLES,
+            blocksize=MIC_BLOCKSIZE,
             callback=self._audio_cb,
             device=self._device,
         )
@@ -103,15 +113,22 @@ class StreamingSession:
 
     def _audio_cb(self, indata: np.ndarray, frames, time_info, status) -> None:
         mono = indata.reshape(-1).astype(np.float32).copy()
-        self._queue.put(mono)
         self._raw_chunks.append(
             (np.clip(mono, -1.0, 1.0) * 32767).astype("<i2").tobytes()
         )
+        # Every block feeds the meter, so the waveform moves at the mic's
+        # natural rate rather than once per decode.
         if self._on_level is not None:
             try:
                 self._on_level(float(np.sqrt(np.mean(np.square(mono)))))
             except Exception:
                 pass  # never let a UI hiccup break capture
+        self._pending.append(mono)
+        self._pending_len += mono.size
+        if self._pending_len >= CHUNK_SAMPLES:
+            self._queue.put(np.concatenate(self._pending))
+            self._pending = []
+            self._pending_len = 0
 
     # ── inference (worker thread) ───────────────────────────────────────
 
@@ -217,6 +234,10 @@ class StreamingSession:
             except Exception as e:
                 print(f"[stream_mlx] save raw failed: {e}", flush=True)
 
+        if self._pending:  # trailing audio shorter than a full chunk
+            self._queue.put(np.concatenate(self._pending))
+            self._pending = []
+            self._pending_len = 0
         self._queue.put(None)  # ends the worker loop, which flushes the tail
         if self._future is not None:
             try:
