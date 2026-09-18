@@ -3,6 +3,7 @@
     vlow                    run the menubar app (what the .app bundle does)
     vlow test [SECONDS]     record from the mic and print the transcript
     vlow transcribe FILE…   transcribe audio files and print the transcript
+    vlow selftest           check this install can load everything it needs
 """
 
 import argparse
@@ -95,6 +96,51 @@ def transcribe_files(paths: list[str], out_path: str | None = None) -> int:
     return 1 if failed else 0
 
 
+def selftest(require_bundle: bool = False) -> int:
+    """Import the whole app stack and check the files it needs are reachable.
+
+    The release build runs this from inside the .app (`selftest --bundled`),
+    which is why it has to go through the bundle executable rather than a
+    bare interpreter: only then is sys.executable Contents/MacOS/vlow, which
+    is what resources.bundle_contents() keys off.
+    """
+    import vlow.app  # noqa: F401
+    import vlow.local_models  # noqa: F401
+    import vlow.overlay  # noqa: F401
+    import vlow.settings_window  # noqa: F401
+    import vlow.stream_aai  # noqa: F401
+    import vlow.transcribe_mlx  # noqa: F401
+    import vlow.transcribe_parakeet  # noqa: F401
+    import vlow.updater  # noqa: F401
+    import mlx.core
+    import mlx_whisper  # noqa: F401
+    import numba  # noqa: F401
+    import rumps  # noqa: F401
+    import sounddevice  # noqa: F401
+
+    from . import resources
+
+    problems = []
+    contents = resources.bundle_contents()
+    if require_bundle and contents is None:
+        problems.append(f"not running from an .app bundle: {sys.executable}")
+    dylib = resources.glass_dylib()
+    if not dylib.exists():
+        problems.append(f"missing glass dylib: {dylib} (run scripts/build-glass.sh)")
+    icon = resources.menubar_icon_dir() / "mic.png"
+    if not icon.exists():
+        problems.append(f"missing menubar icons: {icon}")
+
+    where = "bundle" if contents is not None else "checkout"
+    print(
+        f"   python {sys.version.split()[0]} | mlx {mlx.core.__version__} "
+        f"| {where} | {'ok' if not problems else 'FAILED'}"
+    )
+    for p in problems:
+        print(f"   ✗ {p}", file=sys.stderr)
+    return 1 if problems else 0
+
+
 def run_app() -> None:
     from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
 
@@ -126,6 +172,12 @@ def _parser() -> argparse.ArgumentParser:
         "seconds", nargs="?", type=float, default=4.0, help="how long to record (default 4)"
     )
 
+    st = sub.add_parser("selftest", help="check this install can load everything")
+    st.add_argument(
+        "--bundled", action="store_true",
+        help="also require running from inside vlow.app (used by the release build)",
+    )
+
     tr = sub.add_parser("transcribe", help="transcribe audio files")
     tr.add_argument("files", nargs="+", metavar="FILE", help="any format ffmpeg can decode")
     tr.add_argument("-o", "--output", metavar="PATH", help="write to a file instead of stdout")
@@ -154,6 +206,8 @@ def main() -> None:
     install_power_logging()
     load_config()
 
+    if args.command == "selftest":
+        sys.exit(selftest(args.bundled))
     if args.command == "test":
         _override_backend(args.backend, args.model)
         test_record(args.seconds)

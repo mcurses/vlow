@@ -1,6 +1,6 @@
 [project]
 name = "vlow"
-version = "0.1.4"
+version = "0.2.0"
 description = "Local Whisper voice dictation with global hotkey paste"
 requires-python = ">=3.11"
 dependencies = [

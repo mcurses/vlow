@@ -172,16 +172,7 @@ codesign --verify --deep --strict --verbose=1 "$APP"
 
 # --- 8. Smoke test -------------------------------------------------------------
 log "Smoke test: importing the app stack from inside the bundle"
-"$CONTENTS/MacOS/vlow" -c "
-import sys
-import vlow.app, vlow.overlay, vlow.settings_window, vlow.updater, vlow.local_models, vlow.transcribe_mlx, vlow.transcribe_parakeet, vlow.stream_aai
-import mlx.core, mlx_whisper, sounddevice, rumps, numba
-from vlow import resources
-assert resources.bundle_contents() is not None, sys.executable
-assert resources.glass_dylib().exists(), resources.glass_dylib()
-assert resources.menubar_icon_dir().joinpath('mic.png').exists()
-print('   python', sys.version.split()[0], '| mlx', mlx.core.__version__, '| ok')
-"
+"$CONTENTS/MacOS/vlow" selftest --bundled
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"
 
 [ "${VLOW_SKIP_DMG:-}" = "1" ] && exit 0
