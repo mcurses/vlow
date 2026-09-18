@@ -215,6 +215,15 @@ private struct SettingsView: View {
     @ObservedObject var model: VlowSettingsModel
     @State private var selectedWord: KnownWord.ID?
 
+    /// Mirrors VlowApp._streaming_engine: only Parakeet can stream on-device,
+    /// and an explicit on-device backend never silently falls back to cloud.
+    private var streamTarget: String {
+        if model.data.local_model == "parakeet-tdt-0.6b-v3" && model.data.backend != "assemblyai" {
+            return "on-device"
+        }
+        return model.data.backend == "mlx" ? "unavailable" : "AssemblyAI"
+    }
+
     private var hotkeyName: String {
         switch model.data.hotkey {
         case "right_opt": return "Right Option"
@@ -255,7 +264,9 @@ private struct SettingsView: View {
                 if model.data.mode == "toggle" {
                     Toggle(isOn: $model.data.hold_to_stream) {
                         Text("Hold to stream live")
-                        Text("Holding \(hotkeyName) streams via AssemblyAI; off means only the double-tap does anything")
+                        Text(streamTarget == "unavailable"
+                             ? "Whisper can't stream — switch the on-device model to Parakeet, or the backend to auto or AssemblyAI"
+                             : "Holding \(hotkeyName) streams \(streamTarget == "on-device" ? "on-device via Parakeet" : "via AssemblyAI"); off means only the double-tap does anything")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -285,9 +296,9 @@ private struct SettingsView: View {
                 Text("Dictation")
             } footer: {
                 if model.data.mode == "ptt" {
-                    Text("Hold \(hotkeyName) to stream live via AssemblyAI; release to stop.")
+                    Text("Hold \(hotkeyName) to stream live \(streamTarget == "on-device" ? "on-device" : "via AssemblyAI"); release to stop.")
                 } else if model.data.hold_to_stream {
-                    Text("Double-tap \(hotkeyName) to start recording and again to stop and paste. Hold it to stream live via AssemblyAI.")
+                    Text("Double-tap \(hotkeyName) to start recording and again to stop and paste. Hold it to stream live \(streamTarget == "on-device" ? "on-device" : "via AssemblyAI").")
                 } else {
                     Text("Double-tap \(hotkeyName) to start recording and again to stop and paste.")
                 }
@@ -385,7 +396,7 @@ private struct SettingsView: View {
                 Text("AssemblyAI")
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Needed for the hold-to-stream gesture and for the cloud and auto backends. Language is an ISO 639-1 code such as de or en; leave it empty to auto-detect.")
+                    Text("Needed for the cloud and auto backends, and for hold-to-stream unless you are streaming on-device with Parakeet. Language is an ISO 639-1 code such as de or en; leave it empty to auto-detect.")
                     Link("Get an API key…", destination: URL(string: "https://www.assemblyai.com/dashboard/api-keys")!)
                 }
             }

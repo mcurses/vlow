@@ -93,6 +93,7 @@ src/vlow/
 ├── known_words_fix.py fuzzy post-correction toward known words (Parakeet)
 ├── transcribe_aai.py  cloud universal-3.5-pro/2 via the AssemblyAI SDK
 ├── stream_aai.py      live AssemblyAI Universal Streaming session (hold gesture)
+├── stream_mlx.py      on-device streaming via parakeet-mlx, LocalAgreement commits
 ├── hotkey.py          double-tap + hold detectors over NSEvent flagsChanged
 ├── overlay.py         borderless non-activating NSPanel hosting the SwiftUI glass pill
 ├── paste.py           pbcopy + synthesized Cmd+V via CGEvent

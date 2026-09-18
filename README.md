@@ -30,8 +30,9 @@ you flip a switch by hand, in the middle of talking.
 
 **The gesture chooses the pipeline.** Double-tap gets you batch dictation:
 record, transcribe, one clean paste. *Hold* the same key and you get live
-streaming instead, with each finalized turn pasted as it arrives. One key,
-two fundamentally different paths, no mode to remember.
+streaming instead, text appearing as you speak. One key, two fundamentally
+different paths, no mode to remember — and with Parakeet the live path runs
+on-device too, so streaming dictation never has to leave your Mac.
 
 **You never wait to talk again.** Stop a recording and it goes into a queue
 instead of locking the hotkey — start the next one immediately. Each pending

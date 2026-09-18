@@ -41,6 +41,22 @@ def _on_worker(fn: Callable[[], _T]) -> _T:
     return _worker.submit(fn).result()
 
 
+def submit_to_worker(fn: Callable[[], _T]):
+    """Schedule `fn` on the model's thread without waiting for it.
+
+    stream_mlx runs its whole session as one task here: MLX streams are
+    thread-bound, and transcribe_stream() flips the encoder to local
+    attention for its duration, so a batch decode interleaving on the same
+    model would both race and read the wrong attention mode. Occupying the
+    single worker makes queued batch jobs wait instead."""
+    return _worker.submit(fn)
+
+
+def load_model():
+    """The shared model instance. Call from the worker thread only."""
+    return _load()
+
+
 def _load():
     global _model
     if _model is None:

@@ -14,13 +14,33 @@ default; Right Option, Left Option and Right Command are the alternatives.
 | Gesture | Action |
 |---|---|
 | Hotkey × 2 (within 350 ms) | Start recording. Double-tap again to stop; the recording is queued, transcribed and pasted once. |
-| Hold the hotkey | Live AssemblyAI streaming. Finalized turns paste into the focused app as they arrive. Release to stop. |
+| Hold the hotkey | Live streaming. Text pastes into the focused app as you speak. Release to stop. |
 | Re-paste shortcut | Paste the last transcript again. Off until you set one in Settings. |
 
-The hold gesture needs an AssemblyAI API key; without one, only the
-double-tap works (the startup notification says so). If you never want it,
-turn off **Hold to stream live** — the hotkey then only reacts to
-double-taps.
+If you never want the hold gesture, turn off **Hold to stream live** — the
+hotkey then only reacts to double-taps.
+
+#### Where streaming runs
+
+Streaming follows the **Backend** setting, like batch transcription does, with
+one constraint: only Parakeet can stream on-device. Whisper attends over whole
+30-second windows, so it cannot produce text as you speak.
+
+| Backend | On-device model | Hold gesture streams |
+|---|---|---|
+| On-device (MLX) | Parakeet | on-device, no network |
+| On-device (MLX) | Whisper | *refused* — vlow tells you rather than uploading |
+| Auto | Parakeet | on-device |
+| Auto | Whisper | AssemblyAI |
+| AssemblyAI | either | AssemblyAI |
+
+Choosing the on-device backend explicitly never falls back to the cloud
+behind your back; *auto* does, because that is what auto means.
+
+On-device streaming commits text once three successive decodes agree on it,
+about 1.5 s behind your voice, and flushes whatever is left when you release.
+Pasting cannot be undone, so it waits for that agreement rather than pasting a
+first guess it might revise.
 
 ### Recording while something is still transcribing
 

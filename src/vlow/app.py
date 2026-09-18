@@ -48,7 +48,7 @@ from .recordings import (
 )
 from .replay import ReplayHotkey
 from .settings_window import open_settings, set_model_status, set_update_progress, set_update_status
-from .stream_aai import StreamingSession
+from . import stream_aai, stream_mlx
 from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
 
 
@@ -615,7 +615,14 @@ class VlowApp(rumps.App):
             t0 = time.time()
             if self._mode == "ptt":
                 if not _os.environ.get("ASSEMBLYAI_API_KEY"):
-                    raise RuntimeError("ASSEMBLYAI_API_KEY required for ptt mode.")
+                    local_ready = local_models.selected_key() == "parakeet-tdt-0.6b-v3" and (
+                        local_models.is_downloaded(local_models.selected())
+                    )
+                    if not local_ready:
+                        raise RuntimeError(
+                            "ptt mode needs either the Parakeet model (on-device "
+                            "streaming) or ASSEMBLYAI_API_KEY."
+                        )
             elif self._needs_model() and not local_models.is_downloaded(local_models.selected()):
                 # Never pull gigabytes behind the user's back: point them at the
                 # Download button instead (and open Settings the first time).
@@ -691,12 +698,44 @@ class VlowApp(rumps.App):
             # streaming owns the mic exclusively
             _log(f"double-tap ignored (state={self._state.value})")
 
+    def _streaming_engine(self) -> "tuple[object, str] | None":
+        """Which engine the hold gesture should use, following the Backend
+        setting just as batch transcription does.
+
+        Only Parakeet can stream on-device — Whisper attends over whole 30 s
+        windows. If the user has explicitly chosen the on-device backend and
+        the model can't stream, we refuse rather than quietly uploading their
+        audio; "auto" does permit the cloud, so there it falls back.
+        """
+        local_ready = local_models.selected_key() == "parakeet-tdt-0.6b-v3" and (
+            local_models.is_downloaded(local_models.selected())
+        )
+        backend = backend_name()
+        if backend == "assemblyai":
+            return stream_aai.StreamingSession, "assemblyai"
+        if local_ready:
+            return stream_mlx.StreamingSession, "on-device"
+        if backend == "mlx":
+            rumps.notification(
+                "vlow can't stream on-device",
+                "",
+                "Hold-to-stream needs the Parakeet model — Whisper can't stream. "
+                "Pick it in Settings, or switch the backend to auto or AssemblyAI.",
+            )
+            return None
+        return stream_aai.StreamingSession, "assemblyai"
+
     def _start_stream(self) -> None:
         # Hold gesture can fire while the user is also in a batch session —
         # ignore unless we're idle.
         if not self._ready or self._state != State.IDLE:
             _log(f"hold ignored (ready={self._ready}, state={self._state.value})")
             return
+        engine = self._streaming_engine()
+        if engine is None:
+            return
+        session_cls, label = engine
+        _log(f"streaming via {label}")
         self._to_state(State.STREAMING, "hold start")
         self._pasted_in_session = False
         self._last_text = ""
@@ -706,7 +745,7 @@ class VlowApp(rumps.App):
         self._set_status_icon("recording")
         # Pending transcriptions move out into blobs: the pill is the mic now.
         self._sync_overlay()
-        self._stream = StreamingSession(
+        self._stream = session_cls(
             on_final=self._on_stream_final,
             on_level=self._on_level,
             device=self._input_device,
