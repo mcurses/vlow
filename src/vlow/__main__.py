@@ -1,9 +1,15 @@
-"""The `vlow` command: menubar app by default, plus two one-shot subcommands.
+"""The `vlow` command — every capability vlow has, under the one name.
 
     vlow                    run the menubar app (what the .app bundle does)
     vlow test [SECONDS]     record from the mic and print the transcript
     vlow transcribe FILE…   transcribe audio files and print the transcript
     vlow selftest           check this install can load everything it needs
+    vlow start|stop|restart control the background vlow (launchd)
+    vlow status|logs        is it running, and what has it been saying
+    vlow install-cli        put `vlow` on your PATH (~/.local/bin)
+
+The service commands used to be a separate shell script also called vlow,
+which shadowed this one on PATH — see service.py.
 """
 
 import argparse
@@ -178,6 +184,26 @@ def _parser() -> argparse.ArgumentParser:
         help="also require running from inside vlow.app (used by the release build)",
     )
 
+    for name, blurb in (
+        ("start", "start vlow in the background (needs Start at login)"),
+        ("stop", "stop the background vlow until the next start or login"),
+        ("restart", "restart the background vlow, picking up new code"),
+        ("status", "whether vlow is running, plus the last log lines"),
+    ):
+        sub.add_parser(name, help=blurb)
+
+    lg = sub.add_parser("logs", help="follow vlow's log (Ctrl-C to stop)")
+    lg.add_argument(
+        "-n", "--lines", type=int, default=20, metavar="N",
+        help="how much backlog to print before following (default 20)",
+    )
+
+    ic = sub.add_parser("install-cli", help="put `vlow` on your PATH (~/.local/bin)")
+    ic.add_argument(
+        "--force", action="store_true",
+        help="replace whatever is at that path, even if vlow did not put it there",
+    )
+
     tr = sub.add_parser("transcribe", help="transcribe audio files")
     tr.add_argument("files", nargs="+", metavar="FILE", help="any format ffmpeg can decode")
     tr.add_argument("-o", "--output", metavar="PATH", help="write to a file instead of stdout")
@@ -201,6 +227,18 @@ def main() -> None:
     from .diag import install_power_logging, install_signal_dump
 
     args = _parser().parse_args()  # before any logging, so --help stays clean
+
+    # Service commands talk to launchd and print a report; they want neither
+    # the startup banner nor a config load, and `logs` execs into tail.
+    if args.command in ("start", "stop", "restart", "status", "logs", "install-cli"):
+        from . import service
+
+        if args.command == "logs":
+            sys.exit(service.logs(args.lines))
+        if args.command == "install-cli":
+            sys.exit(service.install_cli(args.force))
+        sys.exit(getattr(service, args.command)())
+
     _log("starting…")
     install_signal_dump()
     install_power_logging()

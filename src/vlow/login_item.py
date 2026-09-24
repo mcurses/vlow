@@ -8,8 +8,8 @@ into ~/Library/Logs/vlow, which is what the troubleshooting steps read.
 Turning the toggle on writes the plist; turning it off deletes it. Neither
 touches the running process — bootstrapping the agent while vlow is already
 running would just put a second menubar icon on screen, so the change takes
-effect at the next login. `scripts/vlow start` loads it immediately if you
-want it now.
+effect at the next login. `vlow start` loads it immediately if you want it
+now.
 """
 
 import os
