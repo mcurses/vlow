@@ -70,6 +70,16 @@ def current() -> dict:
         }
         for m in MODELS.values()
     ]
+    # Nor is the CLI symlink a config key: the link on disk is the truth, and
+    # the window also needs to know whether the user's shell can see it.
+    from . import cli_link
+
+    link = cli_link.status()
+    out["cli_state"] = link["state"]
+    out["cli_link"] = link["link"]
+    out["cli_on_path"] = link["on_path"]
+    out["cli_path_line"] = link["path_line"]
+
     from .updater import current_version  # local import: updater pulls in AppKit lazily
 
     out["app_version"] = current_version()

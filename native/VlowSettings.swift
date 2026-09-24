@@ -33,6 +33,10 @@ struct SettingsData: Codable, Equatable {
     var known_words: [String] = []
     var check_updates = true
     var start_at_login = false
+    var cli_state = "ok"  // ok | missing | stale | foreign | unavailable
+    var cli_link = ""
+    var cli_on_path = true
+    var cli_path_line = ""
     var config_path = ""
     var app_version = ""
     var local_models: [LocalModelInfo] = []  // read-only, from local_models.py
@@ -245,6 +249,25 @@ private struct SettingsView: View {
         alert.buttons.first?.hasDestructiveAction = true
         if alert.runModal() == .alertFirstButtonReturn {
             model.onAction?("removeModel:\(m.key)")
+        }
+    }
+
+    private var cliFooter: String {
+        switch model.data.cli_state {
+        case "ok" where !model.data.cli_on_path:
+            return "vlow is linked at \(model.data.cli_link), but that folder is "
+                + "not on your PATH, so the shell cannot find it yet. Add the line "
+                + "above to ~/.zshrc and open a new terminal."
+        case "ok":
+            return "vlow transcribe recording.m4a works in any terminal. "
+                + "Linked at \(model.data.cli_link)."
+        case "foreign":
+            return "Something that vlow did not create already sits at "
+                + "\(model.data.cli_link). Replacing it overwrites that file."
+        default:
+            return "Puts a vlow symlink in ~/.local/bin so you can transcribe "
+                + "files, follow the log and restart vlow from a terminal. "
+                + "No admin rights needed — it is your own folder."
         }
     }
 
@@ -479,6 +502,31 @@ private struct SettingsView: View {
                 Text("Startup")
             } footer: {
                 Text("Takes effect at your next login. Quitting vlow from the menubar still quits it for the rest of the session.")
+            }
+
+            if model.data.cli_state != "unavailable" {
+                Section {
+                    LabeledContent("The `vlow` command") {
+                        if model.data.cli_state == "ok" {
+                            Text("Installed").foregroundStyle(.secondary)
+                        } else {
+                            Button(model.data.cli_state == "foreign" ? "Replace…" : "Install") {
+                                model.onAction?("installCli")
+                            }
+                        }
+                    }
+                    if model.data.cli_state == "ok" && !model.data.cli_on_path {
+                        Text(model.data.cli_path_line)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                    }
+                } header: {
+                    Text("Command line")
+                } footer: {
+                    Text(cliFooter)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                }
             }
 
             Section {

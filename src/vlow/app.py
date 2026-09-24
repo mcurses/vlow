@@ -19,7 +19,7 @@ from Foundation import NSOperationQueue
 
 from .audio import Recorder, default_input_name, list_input_devices, refresh_devices
 from . import settings as settings_mod
-from . import local_models, login_item, updater
+from . import cli_link, local_models, login_item, updater
 from .jobs import TranscriptionQueue
 from .config import load as load_config
 from .diag import Watchdog, install_termination_hook
@@ -47,7 +47,13 @@ from .recordings import (
     sweep_pending as recordings_sweep,
 )
 from .replay import ReplayHotkey
-from .settings_window import open_settings, set_model_status, set_update_progress, set_update_status
+from .settings_window import (
+    open_settings,
+    set_model_status,
+    set_update_progress,
+    set_update_status,
+    update_settings,
+)
 from . import stream_aai, stream_mlx
 from .transcribe import auto_threshold_sec, backend_name, transcribe, warmup
 
@@ -239,6 +245,22 @@ class VlowApp(rumps.App):
             threading.Thread(target=self._remove_model, args=(model,), daemon=True).start()
         elif name == "checkUpdates":
             self._check_updates(interactive=True)
+        elif name == "installCli":
+            threading.Thread(target=self._install_cli, daemon=True).start()
+
+    def _install_cli(self) -> None:
+        """Settings → "The `vlow` command". force=True because pressing the
+        button is the explicit consent that startup linking does not have."""
+        try:
+            cli_link.migrate_legacy()
+            cli_link.install(force=True)
+            # They may have just fixed their PATH; do not report a stale answer.
+            cli_link.shell_path(refresh=True)
+        except Exception as e:
+            _log(f"cli install failed: {e}")
+            on_main_thread(lambda: alert("Command line tool", str(e)))
+            return
+        on_main_thread(lambda: update_settings(settings_mod.current()))
 
     # --- updates ---------------------------------------------------------
 
@@ -589,7 +611,18 @@ class VlowApp(rumps.App):
             login_item.refresh()
         except Exception as e:
             _log(f"login item refresh failed: {e}")
+        # Same idea for `vlow` on the user's PATH. Off the main thread: it
+        # asks the login shell for its PATH, which can take a moment.
+        threading.Thread(target=self._refresh_cli_link, daemon=True).start()
         threading.Thread(target=self._auto_update_loop, daemon=True).start()
+
+    def _refresh_cli_link(self) -> None:
+        """Keep `vlow` on PATH pointing here, silently — ~/.local/bin is the
+        user's own directory, so there is nothing to ask permission for."""
+        try:
+            cli_link.ensure()
+        except Exception as e:
+            _log(f"cli link refresh failed: {e}")
 
     def _probe_main(self) -> str:
         """Runs on the main thread via the watchdog ping; summarizes UI health."""
