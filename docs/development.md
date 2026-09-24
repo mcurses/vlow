@@ -88,7 +88,7 @@ git tag v0.1.4 && git push origin v0.1.4
 
 ```
 src/vlow/
-├── __main__.py        CLI entry: the menubar app, `vlow test`, `vlow transcribe`
+├── __main__.py        CLI entry: the menubar app and every `vlow <subcommand>`
 ├── app.py             rumps.App, state machine, menubar items, permission prompt
 ├── audio.py           sounddevice InputStream → numpy float32 16 kHz mono; file decoding
 ├── transcribe.py      backend dispatcher (VLOW_BACKEND, VLOW_LOCAL_MODEL)
@@ -109,6 +109,8 @@ src/vlow/
 ├── settings.py        settings schema, validation, TOML writer, first-run seeding
 ├── settings_window.py PyObjC bridge to the SwiftUI Settings window
 ├── login_item.py      the LaunchAgent behind "Start vlow at login"
+├── service.py         `vlow start|stop|restart|status|logs` over that agent
+├── cli_link.py        the ~/.local/bin/vlow symlink that puts the CLI on PATH
 ├── local_models.py    on-device model registry, status + download with progress
 ├── diag.py            signal stack dumps, power logging, watchdog
 └── updater.py         GitHub Releases check, DMG download, in-place swap, relaunch
@@ -121,6 +123,7 @@ scripts/
 ├── build-app-bundle.sh thin launchd wrapper around the local .venv
 ├── build-glass.sh      the SwiftUI modules → dist/libVlowGlass.dylib
 ├── gen-menubar-icons.py SF Symbol renders for the menubar states
-├── vlow                launchd control CLI for a checkout
+├── dev-install.sh      run this checkout under launchd, the way an install runs
+├── dev-uninstall.sh    undo that
 └── entitlements.plist  hardened-runtime entitlements for signed builds
 ```
