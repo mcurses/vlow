@@ -75,14 +75,17 @@ to files. They show up in Console.app under "Log Reports".
   Python stderr
 - `~/Library/Logs/vlow/vlow.log` — MLX / AssemblyAI stdout
 
-From a source checkout, `scripts/vlow` wraps the launchd commands:
+`vlow` reads and steers the agent for you:
 
 ```bash
-vlow status     # launchd state + last log lines
+vlow status     # running? plus the last log lines
 vlow logs       # live tail (Ctrl-C to stop)
 vlow restart    # force-restart, picking up new code
 vlow stop       # stop until 'vlow start' or the next login
+vlow start      # start it again
 ```
+
+If your shell cannot find `vlow`, see [the CLI](usage.md#command-line).
 
 ## Gatekeeper
 

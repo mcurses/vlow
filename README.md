@@ -74,7 +74,11 @@ vlow transcribe interview.m4a > interview.txt
 ```
 
 Any format ffmpeg reads, several files at once, through the same backend and
-known-words biasing as dictation.
+known-words biasing as dictation. The same command steers the app itself —
+`vlow status`, `vlow logs`, `vlow restart`. vlow links itself into
+`~/.local/bin` on first launch, so this works without sudo; see
+[Usage](docs/usage.md#getting-vlow-on-your-path) if that folder is not on your
+`PATH`.
 
 ## Documentation
 

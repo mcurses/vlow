@@ -108,16 +108,36 @@ in-memory only, so a relaunch returns to the system default.
 
 ## Command line
 
-The `vlow` command runs the menubar app when given no arguments. From a
-source checkout use `uv run vlow`; the installed app's executable works too
-(`/Applications/vlow.app/Contents/MacOS/vlow`).
+Everything vlow does is a subcommand of the one `vlow` command.
 
 ```bash
 vlow                      # run the menubar app
 vlow test                 # record 4s from the mic, print the transcript
 vlow test 8               # ... for 8 seconds
 vlow transcribe talk.m4a  # transcribe a file to stdout
+vlow status               # is vlow running, and what did it last say
+vlow logs                 # follow the log (Ctrl-C to stop)
+vlow start|stop|restart   # steer the background vlow
 ```
+
+### Getting `vlow` on your PATH
+
+On first launch vlow symlinks itself into `~/.local/bin`, which needs no
+administrator rights because the folder is yours. Most shells already have it
+on `PATH`; if yours does not, vlow says so in **Settings → Command line**, and
+one line fixes it:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+Open a new terminal afterwards. If the link is ever missing or points at an
+old install, **Settings → Command line → Install** rewrites it, as does
+`vlow install-cli` (add `--force` to replace a `vlow` that something else put
+there).
+
+Without the link you can always call the executable directly: `uv run vlow`
+from a checkout, or `/Applications/vlow.app/Contents/MacOS/vlow`.
 
 `vlow transcribe` takes any format ffmpeg can decode, including the audio
 track of a video, and several files at once:

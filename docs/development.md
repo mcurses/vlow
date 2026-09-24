@@ -30,9 +30,13 @@ the Accessibility grant is attached to that binary. Building the thin app
 bundle first makes macOS say "vlow" instead:
 
 ```bash
-scripts/vlow install    # build dist/vlow.app, write the agent, start it now
-scripts/vlow uninstall  # stop it and remove the agent
+scripts/dev-install.sh    # build dist/vlow.app, write the agent, start it now
+scripts/dev-uninstall.sh  # stop it and remove the agent
 ```
+
+Those scripts only do the things a *checkout* needs (building a bundle a
+release would ship prebuilt). Steering the agent afterwards is not a dev
+task, so it lives in the CLI itself: `vlow start|stop|restart|status|logs`.
 
 `scripts/build-app-bundle.sh` builds that bundle on its own. It is thin: the
 bundle executable is a *copy of the venv's Python binary* (made
@@ -42,8 +46,9 @@ launcher would still show as `python3.12`. It also sets `LSUIElement`, so no
 Dock icon.
 
 `src/vlow/login_item.py` is the only place that writes
-`~/Library/LaunchAgents/com.vlow.plist`; the Settings toggle and
-`scripts/vlow` both go through it.
+`~/Library/LaunchAgents/com.vlow.plist`; the Settings toggle,
+`scripts/dev-install.sh` and `src/vlow/service.py` all go through it —
+`service.py` reads the label and paths from it rather than repeating them.
 
 ## Building the DMG
 
