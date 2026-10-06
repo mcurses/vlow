@@ -77,14 +77,52 @@ EOF
 # happy inside vlow.app. The copy is turned into a venv-equivalent
 # interpreter by the pyvenv.cfg next to it (marks Contents/ as the venv
 # prefix) and the lib symlink (points site-packages at the real .venv).
+
+# Homebrew's binaries load libpython through the *versioned* Cellar directory
+# (.../Cellar/python@3.12/3.12.14/Frameworks/...), and Homebrew deletes that
+# directory on the next patch bump. A bundle built today stops launching the
+# moment `brew upgrade` moves 3.12.14 to 3.12.15, leaving only a dyld "Library
+# not loaded" in the LaunchAgent log. Rewrite those references onto opt/, the
+# symlink Homebrew keeps pointing at the current patch release. Non-Homebrew
+# interpreters (uv's python-build-standalone) load libpython through
+# @executable_path and pass through untouched.
+stable_python_path() {
+  printf '%s\n' "$1" | sed -E 's#^(/[^ ]*)/Cellar/(python@[0-9.]+)/[^/]+/#\1/opt/\2/#'
+}
+
+# Relink and re-sign in a staging dir, then move the finished binary in.
+# codesign reads a path inside an .app as "seal the whole bundle", and sealing
+# cannot work here: Contents/lib deliberately points at the checkout's .venv,
+# outside the bundle. Signing the bare Mach-O gives us the same shape of
+# signature the copied Homebrew binary already carried.
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+
 PYTHON_REAL="$(readlink -f "$PYTHON")"
 PYTHON_INNER="$(dirname "$PYTHON_REAL")/../Resources/Python.app/Contents/MacOS/Python"
 if [ -x "$PYTHON_INNER" ]; then
-  cp "$PYTHON_INNER" "$APP/Contents/MacOS/vlow"
+  cp "$PYTHON_INNER" "$STAGE/vlow"
 else
-  cp "$PYTHON_REAL" "$APP/Contents/MacOS/vlow"
+  cp "$PYTHON_REAL" "$STAGE/vlow"
 fi
-chmod +x "$APP/Contents/MacOS/vlow"
+chmod +x "$STAGE/vlow"
+
+relinked=0
+while read -r dep; do
+  stable="$(stable_python_path "$dep")"
+  [ "$stable" = "$dep" ] && continue
+  install_name_tool -change "$dep" "$stable" "$STAGE/vlow"
+  relinked=1
+done < <(otool -L "$STAGE/vlow" | sed -n 's/^\t\([^ ]*\).*/\1/p')
+
+# install_name_tool invalidates the signature the binary inherited from
+# Homebrew, and macOS will not launch an arm64 binary whose signature does not
+# match its bytes.
+if [ "$relinked" -eq 1 ]; then
+  codesign --force --sign - --identifier com.vlow "$STAGE/vlow"
+fi
+
+mv "$STAGE/vlow" "$APP/Contents/MacOS/vlow"
 cp "$PROJECT_DIR/.venv/pyvenv.cfg" "$APP/Contents/pyvenv.cfg"
 
 # Contents/lib has to serve two masters: it points site-packages at the
@@ -99,7 +137,7 @@ for entry in "$PROJECT_DIR/.venv/lib/"*; do
 done
 for dylib in "$(dirname "$PYTHON_REAL")/../lib/"libpython*.dylib; do
   [ -e "$dylib" ] || continue
-  ln -sfn "$(readlink -f "$dylib")" "$APP/Contents/lib/$(basename "$dylib")"
+  ln -sfn "$(stable_python_path "$(readlink -f "$dylib")")" "$APP/Contents/lib/$(basename "$dylib")"
 done
 
 # Touch the bundle so LaunchServices re-registers it.
