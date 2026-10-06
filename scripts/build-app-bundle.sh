@@ -107,20 +107,30 @@ else
 fi
 chmod +x "$STAGE/vlow"
 
-relinked=0
 while read -r dep; do
   stable="$(stable_python_path "$dep")"
   [ "$stable" = "$dep" ] && continue
   install_name_tool -change "$dep" "$stable" "$STAGE/vlow"
-  relinked=1
 done < <(otool -L "$STAGE/vlow" | sed -n 's/^\t\([^ ]*\).*/\1/p')
 
-# install_name_tool invalidates the signature the binary inherited from
-# Homebrew, and macOS will not launch an arm64 binary whose signature does not
-# match its bytes.
-if [ "$relinked" -eq 1 ]; then
-  codesign --force --sign - --identifier com.vlow "$STAGE/vlow"
+# Relinking invalidates the signature the binary inherited from Homebrew, and
+# macOS will not launch an arm64 binary whose signature does not match its
+# bytes, so the binary has to be re-signed either way.
+#
+# Which identity we sign with decides whether TCC keeps its grants. An ad-hoc
+# signature has no identity, so the requirement TCC records is a bare cdhash,
+# and every `brew upgrade python@3.12` changes the bytes and silently voids
+# the Microphone and Accessibility approvals while Privacy & Security still
+# shows the toggle on. A stable certificate makes the requirement
+# `identifier "com.vlow" and certificate leaf = H"..."`, which survives.
+SIGN_IDENTITY="${VLOW_DEV_SIGN_IDENTITY:-vlow dev signing}"
+if ! security find-identity -p codesigning | grep -q "\"$SIGN_IDENTITY\""; then
+  echo "Note: no \"$SIGN_IDENTITY\" certificate found; signing ad-hoc." >&2
+  echo "      Run scripts/make-dev-signing-cert.sh so macOS stops dropping" >&2
+  echo "      vlow's microphone and accessibility grants on python upgrades." >&2
+  SIGN_IDENTITY="-"
 fi
+codesign --force --sign "$SIGN_IDENTITY" --identifier com.vlow "$STAGE/vlow"
 
 mv "$STAGE/vlow" "$APP/Contents/MacOS/vlow"
 cp "$PROJECT_DIR/.venv/pyvenv.cfg" "$APP/Contents/pyvenv.cfg"
