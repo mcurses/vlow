@@ -21,7 +21,7 @@ and asks you to download a model (~2.5–3 GB, once).
 
 ## What makes it different
 
-Local dictation apps are not rare. These three things are:
+Local dictation apps are not rare. These things are:
 
 **It picks local or cloud for you.** Set the backend to *auto* and short
 recordings stay on-device while long ones — where a cloud model's accuracy
@@ -39,6 +39,12 @@ instead of locking the hotkey — start the next one immediately. Each pending
 transcription is a glass blob budding out of the recording pill, and text
 lands in the order you spoke it, per app.
 
+**Text lands in the app you started in.** Every batch recording remembers which
+app was frontmost when you began. Switch to something else while it
+transcribes and vlow still pastes into the original app, then hands focus
+back to wherever you are now. Dictate into Slack, move on to your editor,
+and the message turns up in Slack anyway.
+
 **MLX under the hood.** Roughly 2× faster than the whisper.cpp everyone else
 builds on, and Parakeet runs at ~25× realtime — a minute of speech
 transcribed in about two seconds, entirely offline.
@@ -54,8 +60,6 @@ transcribed in about two seconds, entirely offline.
 - **Nothing is lost.** Every session writes its raw audio to disk *before*
   any transcription, including a partial save if vlow is killed mid-sentence.
   Re-run it later with `vlow transcribe`.
-- **It pastes where you meant.** Batch recordings remember which app you
-  started in, paste there, and hand focus back to where you are now.
 - **A real Settings window.** Native SwiftUI, no Save button, everything
   applies live — hotkey, backend, models with download progress, keys,
   known words, start-at-login.
