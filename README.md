@@ -6,69 +6,62 @@
   <img src="assets/overlay.png" width="257" alt="vlow's recording overlay: a glass pill showing a live waveform">
 </div>
 
-Double-tap a modifier key, talk, double-tap again — the text is pasted into
-whatever app you were in. Transcription happens on-device through MLX, with
-no network and no API key. Apple Silicon only; tested on macOS 26.
+Double-tap a modifier key, speak, double-tap again, and the text is pasted
+into the app you were in. Transcription runs on-device through MLX, so the
+default setup needs no network and no API key. Apple Silicon only; tested on
+macOS 26.
 
 ```bash
 brew install --cask --no-quarantine mcurses/vlow/vlow
 ```
 
 Or grab the `.dmg` from [Releases](https://github.com/mcurses/vlow/releases)
-and drag it to Applications. The bundle is self-contained — its own Python,
-MLX and overlay, nothing else to install. On first launch vlow opens Settings
-and asks you to download a model (~2.5–3 GB, once).
+and drag it to Applications. The app bundles its own Python, MLX and overlay.
+On first launch it opens Settings and asks you to download a model
+(~2.5–3 GB, once).
 
-## What makes it different
+## How it works
 
-Local dictation apps are not rare. These things are:
+**Two gestures on one key.** A double-tap starts a batch recording: vlow
+records until you double-tap again, transcribes the whole thing and pastes it
+in one go. Holding the key streams instead, typing text as you speak. With
+Parakeet selected, streaming runs on-device too.
 
-**It picks local or cloud for you.** Set the backend to *auto* and short
-recordings stay on-device while long ones — where a cloud model's accuracy
-and speed actually pay off — go to AssemblyAI. Every other hybrid app makes
-you flip a switch by hand, in the middle of talking.
+**Local or cloud, chosen per recording.** With the backend set to *auto*,
+short recordings are transcribed locally and anything over a threshold (60 s
+by default) goes to AssemblyAI. You don't switch modes by hand.
 
-**The gesture chooses the pipeline.** Double-tap gets you batch dictation:
-record, transcribe, one clean paste. *Hold* the same key and you get live
-streaming instead, text appearing as you speak. One key, two fundamentally
-different paths, no mode to remember — and with Parakeet the live path runs
-on-device too, so streaming dictation never has to leave your Mac.
+**A queue instead of a busy hotkey.** When you stop a recording, it goes into
+a queue and the hotkey is free again right away. Each pending transcription
+shows up as a small glass blob next to the recording pill, and text is pasted
+in the order you spoke it.
 
-**You never wait to talk again.** Stop a recording and it goes into a queue
-instead of locking the hotkey — start the next one immediately. Each pending
-transcription is a glass blob budding out of the recording pill, and text
-lands in the order you spoke it, per app.
+**Pasting into the app you started in.** A batch recording remembers which app
+was in front when it began. If you switch to something else while it
+transcribes, vlow pastes into the original app and then puts you back where
+you were.
 
-**Text lands in the app you started in.** Every batch recording remembers which
-app was frontmost when you began. Switch to something else while it
-transcribes and vlow still pastes into the original app, then hands focus
-back to wherever you are now. Dictate into Slack, move on to your editor,
-and the message turns up in Slack anyway.
+## Details
 
-**MLX under the hood.** Roughly 2× faster than the whisper.cpp everyone else
-builds on, and Parakeet runs at ~25× realtime — a minute of speech
-transcribed in about two seconds, entirely offline.
-
-## A few details worth knowing
-
-- **Two on-device models.** Whisper large-v3 for monolingual accuracy;
-  Parakeet TDT v3 for speed and for mixed German/English, which Whisper
-  mangles because it commits to one language per 30-second window.
-- **Known words.** A list of names and jargon that biases every backend —
+- **Two on-device models.** Whisper large-v3 for accuracy in a single
+  language. Parakeet TDT v3 for speed (about 25× realtime, so a minute of
+  speech takes two or three seconds) and for mixed German/English, which
+  Whisper handles badly because it picks one language per 30-second window.
+- **Known words.** A list of names and jargon that biases every backend: a
   prompt for Whisper, key terms for AssemblyAI, fuzzy post-correction for
   Parakeet.
-- **Nothing is lost.** Every session writes its raw audio to disk *before*
-  any transcription, including a partial save if vlow is killed mid-sentence.
-  Re-run it later with `vlow transcribe`.
-- **A real Settings window.** Native SwiftUI, no Save button, everything
-  applies live — hotkey, backend, models with download progress, keys,
-  known words, start-at-login.
-- **It updates itself.** A daily check against GitHub Releases; one click
-  downloads, swaps the app and relaunches.
+- **Audio is saved first.** Every session writes its raw audio to disk before
+  transcription starts, and quitting vlow mid-recording still saves what was
+  captured. Re-run it later with `vlow transcribe`.
+- **Native Settings window.** SwiftUI, no Save button; changes apply
+  immediately. Hotkey, backend, models with download progress, API keys, known
+  words, start at login.
+- **Updates.** vlow checks GitHub Releases once a day. One click downloads the
+  new version, replaces the app and relaunches.
 
-> **On the "no network" claim:** it holds for the on-device backend. In
-> *auto* mode anything over the threshold (60 s by default) is uploaded to
-> AssemblyAI, and ordinary dictation crosses a minute often. See
+> **About "no network":** that only holds for the on-device backend. In *auto*
+> mode, recordings over the threshold are uploaded to AssemblyAI, and normal
+> dictation goes past a minute fairly often. See
 > [Configuration](docs/configuration.md#transcription-backends).
 
 ## Also a CLI
@@ -77,11 +70,11 @@ transcribed in about two seconds, entirely offline.
 vlow transcribe interview.m4a > interview.txt
 ```
 
-Any format ffmpeg reads, several files at once, through the same backend and
-known-words biasing as dictation. The same command steers the app itself —
-`vlow status`, `vlow logs`, `vlow restart`. vlow links itself into
-`~/.local/bin` on first launch, so this works without sudo; see
-[Usage](docs/usage.md#getting-vlow-on-your-path) if that folder is not on your
+`vlow transcribe` takes anything ffmpeg can read, several files at a time, and
+uses the same backend and known words as dictation. The same command also
+controls the running app: `vlow status`, `vlow logs`, `vlow restart`. On first
+launch vlow links itself into `~/.local/bin`, so no sudo is needed; see
+[Usage](docs/usage.md#getting-vlow-on-your-path) if that folder isn't on your
 `PATH`.
 
 ## Documentation
