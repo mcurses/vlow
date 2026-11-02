@@ -68,21 +68,41 @@ unpacked, ~240 MB as a DMG.
 
 Signing defaults to ad-hoc. For a Developer ID build set
 `VLOW_SIGN_IDENTITY="Developer ID Application: …"` (which adds the hardened
-runtime plus `scripts/entitlements.plist`) and, to notarize, `VLOW_NOTARIZE=1`
-with `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`.
+runtime plus `scripts/entitlements.plist`). `VLOW_NOTARIZE=1` then notarizes
+and staples the .app and the DMG. Locally it uses the notarytool keychain
+profile `vlow` (an App Store Connect API key; override the name with
+`VLOW_NOTARY_PROFILE`), created once with
+
+```bash
+xcrun notarytool store-credentials vlow --key ~/.appstoreconnect/private_keys/AuthKey_<KEYID>.p8 \
+  --key-id <KEYID> --issuer <ISSUER-ID>
+```
+
+With `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_PASSWORD` set, it uses those
+instead (that is what CI passes).
 
 ## Releasing
 
-CI does the same on `macos-26` runners
-([`.github/workflows/release.yml`](../.github/workflows/release.yml)). Pushing
-a `v*` tag builds the DMG and attaches it to a GitHub Release; *Run workflow*
-on the Actions tab builds a downloadable artifact without releasing. Add the
-secrets listed at the top of the workflow to get signed, notarized releases
-instead of ad-hoc ones.
+Releases are built, signed and notarized locally, then published by hand:
 
 ```bash
-git tag v0.1.4 && git push origin v0.1.4
+# bump version in pyproject.toml, commit "Release X.Y.Z"
+VLOW_SIGN_IDENTITY="Developer ID Application: Max Studanski (XHXWK3RG86)" \
+  VLOW_NOTARIZE=1 scripts/build-release.sh
+git push origin main
+gh release create vX.Y.Z dist/vlow-X.Y.Z-arm64.dmg --target main --title vX.Y.Z --notes "…"
 ```
+
+Then set `version` and `sha256` (`shasum -a 256` of the DMG) in
+`Casks/vlow.rb` of the [mcurses/homebrew-vlow](https://github.com/mcurses/homebrew-vlow)
+tap.
+
+CI ([`.github/workflows/release.yml`](../.github/workflows/release.yml)) runs
+the same script on `macos-26` runners for every `v*` tag, and *Run workflow*
+on the Actions tab builds a downloadable artifact. Without the signing
+secrets listed at the top of the workflow it only uploads the artifact and
+publishes nothing, so it cannot replace a signed DMG with an ad-hoc one. With
+those secrets it publishes the release and bumps the cask itself.
 
 ## Layout
 

@@ -3,10 +3,9 @@
 Two install paths, picked by how vlow is running:
 
 * Release bundle (scripts/build-release.sh): download the DMG, mount it,
-  swap the .app directory next to the running one, relaunch. The app is
-  ad-hoc signed, so macOS treats the new build as a new app: Accessibility
-  has to be granted again after an update (a Developer ID signature would
-  avoid that).
+  swap the .app directory next to the running one, relaunch. Releases are
+  Developer ID signed, so TCC grants survive the swap (updating from an
+  ad-hoc signed build before 0.3.1 asks for them once more).
 * Source checkout (``uv run vlow`` or the thin launchd bundle from
   scripts/build-app-bundle.sh): ``git pull --ff-only``, ``uv sync``,
   rebuild the thin bundle and restart through launchd (or re-exec).

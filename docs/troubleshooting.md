@@ -10,9 +10,11 @@ terminal, and permission changes never apply to an already-running process —
 2. **Accessibility** — auto-prompted on launch. Required for the modifier-key
    monitor and the synthesized `Cmd+V`.
 
-The ad-hoc signed build makes macOS treat the app as new whenever its
-executable changes — a fresh install, an update, or a rebuilt
-`dist/vlow.app`. When that happens:
+macOS asks again when it sees vlow as a new app: the first install of a
+Developer ID signed release (0.3.1 or later) over an older ad-hoc signed one,
+or a dev bundle in `dist/vlow.app` signed ad-hoc or with a different
+certificate. Updates between signed releases keep the grants. When it does
+happen:
 
 1. Open **System Settings → Privacy & Security → Accessibility**.
 2. Find **vlow** and toggle it on. Stale `python3.12` entries from older
@@ -89,10 +91,7 @@ If your shell cannot find `vlow`, see [the CLI](usage.md#command-line).
 
 ## Gatekeeper
 
-The build is ad-hoc signed, so on first launch macOS may say the app "cannot
-be verified". Open **System Settings → Privacy & Security**, scroll down and
-click **Open Anyway** — or skip quarantine outright:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/vlow.app
-```
+Releases from 0.3.1 on are signed with a Developer ID and notarized by
+Apple, so they open without a warning. Older ad-hoc signed builds made macOS
+say the app "cannot be verified"; for those, open **System Settings →
+Privacy & Security**, scroll down and click **Open Anyway**.

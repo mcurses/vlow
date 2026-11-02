@@ -85,8 +85,8 @@ bar in Settings (and a percentage in the menubar item):
 
 - **Downloaded app** — fetches the DMG, mounts it, swaps `vlow.app` in place
   (the old copy is kept until the new one is in position) and relaunches.
-  Because the build is ad-hoc signed, macOS asks for Accessibility again
-  after each update.
+  Releases are Developer ID signed, so the Accessibility and Microphone
+  grants carry over to the new version.
 - **Homebrew cask** — the cask is marked `auto_updates`, so `brew upgrade`
   leaves it alone and vlow's own updater keeps it current.
   `brew upgrade --greedy` forces the cask version instead.

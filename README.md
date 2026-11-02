@@ -12,7 +12,7 @@ default setup needs no network and no API key. Apple Silicon only; tested on
 macOS 26.
 
 ```bash
-brew install --cask --no-quarantine mcurses/vlow/vlow
+brew install --cask mcurses/vlow/vlow
 ```
 
 Or grab the `.dmg` from [Releases](https://github.com/mcurses/vlow/releases)
