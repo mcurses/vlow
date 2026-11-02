@@ -42,7 +42,8 @@ class Job:
     target: object | None  # NSRunningApplication the text belongs to
     target_key: object  # what "same app" means for ordering (pid, or None)
     audio: np.ndarray = field(repr=False)
-    audio_path: Path | None = None
+    audio_path: Path | None = None  # pending/ copy, deleted once delivered
+    recording_path: Path | None = None  # rolling copy; gets the transcript
     text: str = ""
     error: str = ""
     done: bool = False  # transcription finished (successfully or not)
@@ -99,7 +100,7 @@ class TranscriptionQueue:
         # Persist before any transcription so a crash never loses the audio.
         try:
             job.audio_path = recordings.save_pending(job.seq, audio)
-            recordings.save_float32(audio)  # keep last_recording.wav current
+            job.recording_path = recordings.save_float32(audio)
         except Exception as e:
             self._log(f"saving queued recording failed: {e}")
 
@@ -138,6 +139,7 @@ class TranscriptionQueue:
         started = time.monotonic()
         try:
             job.text = transcribe(job.audio)
+            recordings.save_transcript(job.recording_path, job.text)
         except Exception as e:
             job.error = str(e)
             self._log(f"{job.id} failed after {time.monotonic() - started:.1f}s: {e!r}")

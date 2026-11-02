@@ -107,6 +107,7 @@ class StreamingSession:
         self._pending: list[np.ndarray] = []  # mic blocks not yet a full chunk
         self._pending_len = 0
         self._raw_chunks: list[bytes] = []
+        self.recording_path = None  # set by stop(): where the raw audio went
         self._lock = threading.Lock()
         self._committed = ""  # everything handed to on_final so far
         self._drafts: list[str] = []
@@ -321,7 +322,7 @@ class StreamingSession:
             try:
                 from .recordings import save_int16_bytes
 
-                save_int16_bytes(b"".join(self._raw_chunks))
+                self.recording_path = save_int16_bytes(b"".join(self._raw_chunks))
             except Exception as e:
                 print(f"[stream_mlx] save raw failed: {e}", flush=True)
 

@@ -156,27 +156,28 @@ go to stdout and progress to stderr, so piping gives you the text alone.
 
 Set `VLOW_DEBUG=1` to print hotkey diagnostics while the app runs.
 
-## Recovery — the last recording is always on disk
+## Recovery — the last three recordings are always on disk
 
 Every session, batch or streaming, writes its raw audio to
-`~/Library/Application Support/vlow/last_recording.wav` *before* any network
-round-trip. If MLX crashes, the WebSocket hangs, or you hit Discard by
-mistake, the audio is still there. If vlow is terminated mid-capture (a
-restart, `kill`, logout, an update relaunch), a SIGTERM/SIGINT/SIGHUP hook
-writes whatever was captured up to that moment before the process exits.
-SIGKILL cannot be intercepted.
+`~/Library/Application Support/vlow/recordings/<date>_<time>.wav` *before*
+any network round-trip. If MLX crashes, the WebSocket hangs, or you hit
+Discard by mistake, the audio is still there. If vlow is terminated
+mid-capture (a restart, `kill`, logout, an update relaunch), a
+SIGTERM/SIGINT/SIGHUP hook writes whatever was captured up to that moment
+before the process exits. SIGKILL cannot be intercepted.
 
-That file only ever holds the newest recording — each one overwrites the
-last, written atomically, so it is always either the old valid recording or
-the new complete one. Because a queue can hold several recordings at once,
-each queued one *also* gets its own file in
-`~/Library/Application Support/vlow/pending/`, kept until its text has been
-pasted, so a crash with three jobs in flight can't lose the older two.
+Once a recording has been transcribed, its text is saved next to it as
+`<date>_<time>.txt`. vlow keeps the three newest recordings with their
+transcripts and deletes older ones as new recordings arrive. Each file is
+written atomically, so it is always either absent or complete. Because a
+queue can hold several recordings at once, each queued one *also* gets its
+own file in `~/Library/Application Support/vlow/pending/`, kept until its
+text has been pasted, so a crash with more jobs in flight can't lose any.
 
 ```bash
-# Reveal it (or use the menubar item)
-open "$HOME/Library/Application Support/vlow/last_recording.wav"
+# Reveal the newest one (or use the menubar item)
+open -R "$(ls -d "$HOME/Library/Application Support/vlow/recordings/"*.wav | tail -1)"
 
-# Transcribe it again, with any backend
-vlow transcribe "$HOME/Library/Application Support/vlow/last_recording.wav"
+# Transcribe one again, with any backend
+vlow transcribe "$HOME/Library/Application Support/vlow/recordings/<date>_<time>.wav"
 ```

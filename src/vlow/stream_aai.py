@@ -33,6 +33,7 @@ class StreamingSession:
         self._on_final = on_final or (lambda _: None)
         self._on_level = on_level
         self._device = device  # None → system default at start()
+        self.recording_path = None  # set by stop(): where the raw audio went
         self._queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
         self._final_parts: list[str] = []
         self._last_partial: str = ""
@@ -156,7 +157,7 @@ class StreamingSession:
         if self._raw_chunks:
             try:
                 from .recordings import save_int16_bytes
-                save_int16_bytes(b"".join(self._raw_chunks))
+                self.recording_path = save_int16_bytes(b"".join(self._raw_chunks))
             except Exception as e:
                 print(f"[stream_aai] save raw failed: {e}", flush=True)
 

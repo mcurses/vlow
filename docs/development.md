@@ -123,7 +123,7 @@ src/vlow/
 ├── overlay.py         borderless non-activating NSPanel hosting the SwiftUI glass pill
 ├── paste.py           pbcopy + synthesized Cmd+V via CGEvent
 ├── replay.py          pynput global shortcut → re-paste last text
-├── recordings.py      the always-on-disk last_recording.wav + pending/ queue files
+├── recordings.py      the last three recordings + transcripts, pending/ queue files
 ├── resources.py       finds icons / dylib / .env in both the checkout and the .app
 ├── config.py          config.toml + .env loading, env mirroring
 ├── settings.py        settings schema, validation, TOML writer, first-run seeding

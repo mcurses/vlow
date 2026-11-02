@@ -40,10 +40,11 @@ from .paste import (
     snapshot_clipboard,
 )
 from .recordings import (
-    LATEST_PATH as RECORDING_PATH,
+    RECORDINGS_DIR,
     reveal_in_finder,
     save_float32,
     save_int16_bytes,
+    save_transcript,
     sweep_pending as recordings_sweep,
 )
 from .replay import ReplayHotkey
@@ -553,7 +554,7 @@ class VlowApp(rumps.App):
             rumps.notification(
                 "vlow",
                 "no recording yet",
-                f"{RECORDING_PATH} doesn't exist — record something first.",
+                f"{RECORDINGS_DIR} is empty — record something first.",
             )
 
     def _deferred_setup(self, _sender) -> None:
@@ -804,7 +805,8 @@ class VlowApp(rumps.App):
         session = self._stream
         try:
             if session is not None:
-                session.stop()  # late finals fire via on_final during this
+                text = session.stop()  # late finals fire via on_final during this
+                save_transcript(getattr(session, "recording_path", None), text)
         except Exception as e:
             print(f"stream stop error: {e}", flush=True)
         finally:
@@ -973,8 +975,8 @@ class VlowApp(rumps.App):
                 _log(f"paste failed: {e2!r}")
 
     def emergency_save(self) -> None:
-        """SIGTERM while capturing: write whatever audio exists so far to
-        last_recording.wav. Runs on the termination thread, touches no UI.
+        """SIGTERM while capturing: write whatever audio exists so far to the
+        recordings folder. Runs on the termination thread, touches no UI.
         Queued jobs already have their own file under recordings.PENDING_DIR,
         written the moment they were enqueued."""
         state = self._state
