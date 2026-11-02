@@ -73,11 +73,13 @@ def is_meum(app) -> bool:
 
 
 def focused_tab() -> str | None:
-    """Id of the tab that has focus in meum, or None if meum can't say."""
+    """Id of the terminal tab that has focus in meum, or None if meum can't
+    say or the focused tab is a widget (a browser, say), which takes no
+    paste; then the ordinary app paste applies."""
     try:
-        result = _call("tab.focused", {}, FOCUS_TIMEOUT_SEC)
-        tab = (result or {}).get("tab")
-        return str(tab) if tab else None
+        result = _call("tab.focused", {}, FOCUS_TIMEOUT_SEC) or {}
+        tab = result.get("tab")
+        return str(tab) if tab and not result.get("widget") else None
     except MeumError as e:
         if e.code != "method_not_found":
             return None
