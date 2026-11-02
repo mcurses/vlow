@@ -2,15 +2,18 @@
 # a GitHub Release. `workflow_dispatch` builds the same DMG as a downloadable
 # artifact without publishing a release (for trying out the pipeline).
 #
-# Signing is optional. Without secrets the app is ad-hoc signed and users have
-# to allow it once in System Settings → Privacy & Security. To ship a
-# notarized build, add these repository secrets:
+# Without signing secrets CI builds an ad-hoc signed DMG as a downloadable
+# artifact only and publishes nothing: releases are Developer ID signed and
+# notarized, and an unsigned build attached to a tag would replace the signed
+# DMG built locally with `VLOW_SIGN_IDENTITY=… VLOW_NOTARIZE=1
+# scripts/build-release.sh`. To have CI publish signed releases itself, add
+# these repository secrets:
 #   MACOS_CERTIFICATE_P12        base64 of the Developer ID Application .p12
 #   MACOS_CERTIFICATE_PASSWORD   password of that .p12
 #   MACOS_SIGN_IDENTITY          e.g. "Developer ID Application: Name (TEAMID)"
 #   APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD   for notarytool
 #
-# Homebrew: after a tagged release the `bump-cask` job rewrites version and
+# Homebrew: after a release published by CI the `bump-cask` job rewrites version and
 # sha256 in the mcurses/homebrew-vlow tap. It needs a secret TAP_GITHUB_TOKEN
 # (fine-grained PAT with Contents: read/write on that repo); without it the
 # job is skipped and the cask can be bumped by hand.
@@ -28,6 +31,8 @@ jobs:
   build-dmg:
     name: Build DMG (Apple Silicon)
     runs-on: macos-26
+    outputs:
+      published: ${{ steps.publish.outcome == 'success' }}
     env:
       MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -85,7 +90,8 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: github.ref_type == 'tag'
+        id: publish
+        if: github.ref_type == 'tag' && env.MACOS_SIGN_IDENTITY != '' && env.APPLE_ID != ''
         uses: softprops/action-gh-release@v3
         with:
           files: dist/vlow-*.dmg
@@ -95,8 +101,7 @@ jobs:
 
             1. Download `vlow-${{ steps.version.outputs.version }}-arm64.dmg` below and open it.
             2. Drag **vlow** into **Applications**, then launch it.
-            3. If macOS says the app "cannot be verified": open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. (Alternative: `xattr -dr com.apple.quarantine /Applications/vlow.app`.)
-            4. Grant **Microphone** and **Accessibility** when prompted, then relaunch vlow.
+            3. Grant **Microphone** and **Accessibility** when prompted, then relaunch vlow.
 
             Apple Silicon only, macOS 14+. On first launch vlow opens Settings and offers to download an on-device model — Whisper large-v3 (~3 GB) or Parakeet TDT v3 (~2.5 GB), one time; AssemblyAI-only users can skip it.
             Everything else is in the menubar → Settings…; later versions install themselves via Check for Updates….
@@ -104,7 +109,7 @@ jobs:
   bump-cask:
     name: Bump Homebrew cask
     needs: build-dmg
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' && needs.build-dmg.outputs.published == 'true'
     runs-on: ubuntu-latest
     env:
       TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
