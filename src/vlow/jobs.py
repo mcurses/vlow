@@ -41,6 +41,7 @@ class Job:
     seq: int
     target: object | None  # NSRunningApplication the text belongs to
     target_key: object  # what "same app" means for ordering (pid, or None)
+    meum_tab: str | None  # meum tab the recording started in, if any
     audio: np.ndarray = field(repr=False)
     audio_path: Path | None = None  # pending/ copy, deleted once delivered
     recording_path: Path | None = None  # rolling copy; gets the transcript
@@ -84,7 +85,7 @@ class TranscriptionQueue:
 
     # ── public API ──────────────────────────────────────────────────────
 
-    def submit(self, audio: np.ndarray, target) -> Job:
+    def submit(self, audio: np.ndarray, target, meum_tab: str | None = None) -> Job:
         """Enqueue a finished recording. Returns immediately."""
         with self._lock:
             self._seq += 1
@@ -92,6 +93,7 @@ class TranscriptionQueue:
                 seq=self._seq,
                 target=target,
                 target_key=_app_key(target),
+                meum_tab=meum_tab,
                 audio=audio,
             )
             self._jobs.append(job)

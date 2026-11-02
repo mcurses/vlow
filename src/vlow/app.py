@@ -37,8 +37,10 @@ from .paste import (
     paste,
     paste_no_restore,
     restore_clipboard,
+    set_clipboard,
     snapshot_clipboard,
 )
+from . import meum
 from .recordings import (
     RECORDINGS_DIR,
     reveal_in_finder,
@@ -147,6 +149,7 @@ class VlowApp(rumps.App):
         self._last_level_ts = 0.0  # throttles meter updates onto the main thread
         self._last_text = ""
         self._target_app = None  # frontmost app when the batch recording started
+        self._target_meum_tab = None  # ... and its focused tab, when that app is meum
         self._frontmost = FrontmostTracker()  # last non-vlow app, for when vlow itself is active
         self._replay = ReplayHotkey(lambda: self._last_text, self._config.get("repaste_hotkey", ""))
         self._ready = False
@@ -865,6 +868,11 @@ class VlowApp(rumps.App):
         front = frontmost_app()
         note = " (vlow itself is active — using the app before it)" if is_self(front) else ""
         _log(f"target app: {app_label(self._target_app)}{note}")
+        # In meum the app alone is too coarse: remember the tab, so the text
+        # lands there even if the user switches workspaces meanwhile.
+        self._target_meum_tab = meum.focused_tab() if meum.is_meum(self._target_app) else None
+        if self._target_meum_tab:
+            _log(f"target meum tab: {self._target_meum_tab}")
         self._set_status_icon("recording")
         # Pending transcriptions move out into blobs: the pill is the mic now.
         self._sync_overlay()
@@ -882,6 +890,7 @@ class VlowApp(rumps.App):
         """Hand the recording to the queue and go straight back to idle, so
         the next double-tap can start recording immediately."""
         target, self._target_app = self._target_app, None
+        meum_tab, self._target_meum_tab = self._target_meum_tab, None
         self._to_state(State.IDLE, "double-tap stop → queued")
         if self._overlay is not None:
             # Morph straight to the transcribing wave. The job reaches the
@@ -891,11 +900,11 @@ class VlowApp(rumps.App):
         # recorder.stop() blocks ~110ms in PortAudio stream teardown — off
         # the main thread, or the overlay's transition drops frames.
         threading.Thread(
-            target=self._enqueue, args=(self._recorder, target), daemon=True
+            target=self._enqueue, args=(self._recorder, target, meum_tab), daemon=True
         ).start()
         self._recorder = Recorder()  # the queue owns the old one's buffer now
 
-    def _enqueue(self, recorder, target) -> None:
+    def _enqueue(self, recorder, target, meum_tab=None) -> None:
         try:
             audio = recorder.stop()
         except Exception as e:
@@ -908,8 +917,8 @@ class VlowApp(rumps.App):
             on_main_thread(lambda: (self._sync_overlay(), self._refresh_status_icon()))
             return
         if not self._config.get("paste_to_origin_app", True):
-            target = None  # paste wherever focus is when the text is ready
-        self._queue.submit(audio, target)
+            target = meum_tab = None  # paste wherever focus is when the text is ready
+        self._queue.submit(audio, target, meum_tab)
 
     def _on_queue_change(self) -> None:
         """Queue depth changed (any thread) — resync the overlay and icon."""
@@ -956,11 +965,38 @@ class VlowApp(rumps.App):
     def _deliver_job(self, job) -> None:
         """Paste one finished job (delivery thread, already in order)."""
         self._last_text = job.text
+        if job.meum_tab and self._deliver_to_meum(job.text, job.meum_tab):
+            return
         if job.target is None:
             paste(job.text)
             return
         return_focus = bool(self._config.get("return_focus_after_paste", True))
         self._deliver(job.text, job.target, return_focus)
+
+    def _deliver_to_meum(self, text: str, tab: str) -> bool:
+        """Paste into the meum tab the recording started in. If meum can't
+        (tab closed, meum quit), leave the text on the clipboard and say so,
+        rather than pasting it into whatever is in front. Returns False only
+        for a meum that has no tab.paste yet: then the ordinary app paste
+        applies."""
+        try:
+            meum.paste(tab, text)
+            _log(f"pasted into meum tab {tab}")
+            return True
+        except meum.MeumError as e:
+            code = e.code
+            if code == "method_not_found":
+                return False
+            _log(f"meum paste into {tab} failed ({e}); text left on the clipboard")
+        set_clipboard(text)
+        reason = {
+            "not_found": "The meum tab you dictated into is closed.",
+            "offline": "meum isn't running.",
+        }.get(code, "meum couldn't paste it into the tab.")
+        on_main_thread(lambda: rumps.notification(
+            "vlow", "Transcription is on the clipboard", f"{reason} Paste it with ⌘V."
+        ))
+        return True
 
     def _deliver(self, text: str, target, return_focus: bool) -> None:
         try:

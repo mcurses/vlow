@@ -122,6 +122,7 @@ src/vlow/
 ├── hotkey.py          double-tap + hold detectors over NSEvent flagsChanged
 ├── overlay.py         borderless non-activating NSPanel hosting the SwiftUI glass pill
 ├── paste.py           pbcopy + synthesized Cmd+V via CGEvent
+├── meum.py            paste into the meum tab a dictation started in (control socket)
 ├── replay.py          pynput global shortcut → re-paste last text
 ├── recordings.py      the last three recordings + transcripts, pending/ queue files
 ├── resources.py       finds icons / dylib / .env in both the checkout and the .app

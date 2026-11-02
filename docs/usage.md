@@ -76,6 +76,14 @@ original app forward, pastes, and returns focus to where you are now — both
 halves are toggles in Settings (*Paste into the app I started in*, *Return to
 where I was afterwards*), on by default.
 
+In [meum](https://github.com/mcurses/meum), a terminal app with many tabs in
+one window, vlow remembers the tab, not just the app. The text is pasted
+into that tab even if you have moved to another workspace, without
+switching to it and without touching the clipboard. If the tab has been
+closed or meum has quit by then, the text is left on the clipboard and a
+notification says so; vlow does not paste it into some other tab. A meum
+without tab pasting gets the ordinary app paste.
+
 Streaming always pastes into whatever is focused right now, because the text
 arrives while you are still talking.
 
