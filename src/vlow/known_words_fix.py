@@ -26,7 +26,7 @@ def apply_known_words(text: str, words: list[str], threshold: float = _THRESHOLD
     """Return `text` with near-misses of `words` replaced by the exact spelling.
 
     Multi-word terms are matched as a sliding window of the same length;
-    longer terms are tried first so "EMMA Studio" wins over "EMMA".
+    longer terms are tried first so "Visual Studio" wins over "Studio".
     Surrounding punctuation on the matched window is preserved."""
     if not text or not words:
         return text

@@ -114,7 +114,7 @@ local_model = "whisper-large-v3"   # or parakeet-tdt-0.6b-v3 — the model behin
 auto_threshold_sec = 60     # used when backend = "auto"
 assemblyai_api_key = "…"    # or ASSEMBLYAI_API_KEY in .env / the environment
 aai_language = "de"         # empty / omitted → AssemblyAI auto-detects
-known_words = ["EMMA Studio", "vlow"]   # bias all backends toward these names
+known_words = ["Kubernetes", "vlow"]    # bias all backends toward these names
 check_updates = true        # daily GitHub Releases check
 ```
 

@@ -87,7 +87,7 @@ Releases are built, signed and notarized locally, then published by hand:
 
 ```bash
 # bump version in pyproject.toml, commit "Release X.Y.Z"
-VLOW_SIGN_IDENTITY="Developer ID Application: Max Studanski (XHXWK3RG86)" \
+VLOW_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" \
   VLOW_NOTARIZE=1 scripts/build-release.sh
 git push origin main
 gh release create vX.Y.Z dist/vlow-X.Y.Z-arm64.dmg --target main --title vX.Y.Z --notes "…"
