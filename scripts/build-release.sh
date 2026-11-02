@@ -15,8 +15,12 @@
 #   VLOW_SIGN_IDENTITY    codesign identity; default "-" = ad-hoc.
 #                         Set to "Developer ID Application: …" for a real
 #                         signature (enables hardened runtime + timestamp).
-#   VLOW_NOTARIZE=1       after signing, notarize + staple the DMG. Needs
-#                         APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD.
+#   VLOW_NOTARIZE=1       after signing, notarize + staple the .app, then the
+#                         DMG. Credentials: APPLE_ID, APPLE_TEAM_ID and
+#                         APPLE_APP_PASSWORD if set (CI), otherwise the
+#                         notarytool keychain profile VLOW_NOTARY_PROFILE
+#                         (default "vlow"; create it once with
+#                         `xcrun notarytool store-credentials vlow --key …`).
 #   VLOW_SKIP_DMG=1       stop after the .app (faster local iteration)
 #
 # Requirements: uv, Xcode Command Line Tools (clang, swiftc w/ macOS 26 SDK).
@@ -38,6 +42,27 @@ SIGN_IDENTITY="${VLOW_SIGN_IDENTITY:--}"
 DMG="$PROJECT_DIR/dist/vlow-$VERSION-$ARCH.dmg"
 
 log() { printf '\n==> %s\n' "$*"; }
+
+# Submit a file to Apple's notary service and wait for the verdict. On
+# rejection, print Apple's log, which names the offending binaries.
+notarize() {
+  local file="$1" out id
+  local creds
+  if [ -n "${APPLE_ID:-}" ]; then
+    : "${APPLE_TEAM_ID:?}" "${APPLE_APP_PASSWORD:?}"
+    creds=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
+  else
+    creds=(--keychain-profile "${VLOW_NOTARY_PROFILE:-vlow}")
+  fi
+  out="$(xcrun notarytool submit "$file" "${creds[@]}" --wait 2>&1)" || true
+  echo "$out"
+  if ! grep -q 'status: Accepted' <<<"$out"; then
+    id="$(sed -n 's/^ *id: //p' <<<"$out" | head -1)"
+    [ -n "$id" ] && xcrun notarytool log "$id" "${creds[@]}" >&2 || true
+    echo "Error: notarization of $(basename "$file") was not accepted" >&2
+    exit 1
+  fi
+}
 
 command -v uv >/dev/null || { echo "Error: uv not found" >&2; exit 1; }
 command -v clang >/dev/null || { echo "Error: clang not found — install Xcode CLT" >&2; exit 1; }
@@ -175,6 +200,19 @@ log "Smoke test: importing the app stack from inside the bundle"
 "$CONTENTS/MacOS/vlow" selftest --bundled
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"
 
+# Staple the .app itself, not just the DMG: an app dragged out of a stapled
+# DMG carries no ticket of its own and needs Apple's servers for its first
+# Gatekeeper check.
+if [ "${VLOW_NOTARIZE:-}" = "1" ]; then
+  [ "$SIGN_IDENTITY" != "-" ] || { echo "Error: VLOW_NOTARIZE needs VLOW_SIGN_IDENTITY" >&2; exit 1; }
+  log "Notarizing the app"
+  APP_ZIP="$(mktemp -d -t vlow-notary)/vlow.zip"
+  ditto -c -k --keepParent "$APP" "$APP_ZIP"
+  notarize "$APP_ZIP"
+  rm -rf "$(dirname "$APP_ZIP")"
+  xcrun stapler staple "$APP"
+fi
+
 [ "${VLOW_SKIP_DMG:-}" = "1" ] && exit 0
 
 # --- 9. DMG --------------------------------------------------------------------
@@ -196,10 +234,8 @@ if [ "$SIGN_IDENTITY" != "-" ]; then
 fi
 
 if [ "${VLOW_NOTARIZE:-}" = "1" ]; then
-  log "Notarizing"
-  : "${APPLE_ID:?}" "${APPLE_TEAM_ID:?}" "${APPLE_APP_PASSWORD:?}"
-  xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-    --password "$APPLE_APP_PASSWORD" --wait
+  log "Notarizing the DMG"
+  notarize "$DMG"
   xcrun stapler staple "$DMG"
 fi
 
