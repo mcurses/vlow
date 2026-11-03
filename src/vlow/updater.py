@@ -35,6 +35,9 @@ RELEASES_URL = f"https://github.com/{REPO}/releases"
 _API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 _ASSET_SUFFIX = "-arm64.dmg"
 _UA = "vlow-updater"
+# Apple team that signs every release since 0.3.1 (Developer ID). A
+# downloaded app signed by anyone else is never installed.
+RELEASE_TEAM_ID = "XHXWK3RG86"
 
 
 class UpdateError(RuntimeError):
@@ -180,6 +183,11 @@ def install(
         staged = target.parent / (target.name + ".update")
         shutil.rmtree(staged, ignore_errors=True)
         _run(["ditto", str(source), str(staged)])  # preserves signatures/xattrs
+        try:
+            verify_signature(staged)
+        except Exception:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise
         # Swap: keep the old bundle until the new one is in place, then drop it.
         old = target.parent / (target.name + ".old")
         shutil.rmtree(old, ignore_errors=True)
@@ -198,6 +206,21 @@ def install(
     if relaunch:
         _relaunch(target)
     return target
+
+
+def verify_signature(app: Path, team_id: str = RELEASE_TEAM_ID) -> None:
+    """Raise UpdateError unless `app` has an intact code signature from
+    `team_id`. Guards the swap against a tampered or foreign download."""
+    check = subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True
+    )
+    if check.returncode != 0:
+        raise UpdateError(f"The downloaded app's signature is broken: {check.stderr.strip()}")
+    info = subprocess.run(["codesign", "-dv", str(app)], capture_output=True, text=True)
+    team = re.search(r"^TeamIdentifier=(.+)$", info.stderr, re.M)
+    found = team.group(1).strip() if team else "not set"
+    if found != team_id:
+        raise UpdateError(f"The downloaded app is not signed by the vlow developer (team {found}).")
 
 
 def _download(url: str, dest: Path, on_progress: Progress) -> None:
