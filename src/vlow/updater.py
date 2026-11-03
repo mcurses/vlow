@@ -38,6 +38,7 @@ _UA = "vlow-updater"
 # Apple team that signs every release since 0.3.1 (Developer ID). A
 # downloaded app signed by anyone else is never installed.
 RELEASE_TEAM_ID = "XHXWK3RG86"
+BUNDLE_ID = "com.vlow"
 
 
 class UpdateError(RuntimeError):
@@ -209,18 +210,22 @@ def install(
 
 
 def verify_signature(app: Path, team_id: str = RELEASE_TEAM_ID) -> None:
-    """Raise UpdateError unless `app` has an intact code signature from
-    `team_id`. Guards the swap against a tampered or foreign download."""
+    """Raise UpdateError unless `app` is vlow with an intact code signature
+    from a Developer ID certificate Apple issued to `team_id`. Guards the swap
+    against a tampered or foreign download, including one signed with a
+    self-made certificate that merely names the team."""
+    requirement = (
+        f'=anchor apple generic and identifier "{BUNDLE_ID}" '
+        f'and certificate leaf[subject.OU] = "{team_id}"'
+    )
     check = subprocess.run(
-        ["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True
+        ["codesign", "--verify", "--deep", "--strict", "-R", requirement, str(app)],
+        capture_output=True,
+        text=True,
     )
     if check.returncode != 0:
-        raise UpdateError(f"The downloaded app's signature is broken: {check.stderr.strip()}")
-    info = subprocess.run(["codesign", "-dv", str(app)], capture_output=True, text=True)
-    team = re.search(r"^TeamIdentifier=(.+)$", info.stderr, re.M)
-    found = team.group(1).strip() if team else "not set"
-    if found != team_id:
-        raise UpdateError(f"The downloaded app is not signed by the vlow developer (team {found}).")
+        reason = check.stderr.strip().splitlines()[-1:] or ["unknown reason"]
+        raise UpdateError(f"The downloaded app is not a genuine vlow release: {reason[0]}")
 
 
 def _download(url: str, dest: Path, on_progress: Progress) -> None:
